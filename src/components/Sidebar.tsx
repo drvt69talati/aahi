@@ -3,6 +3,8 @@ import { useAppStore, SidebarPanel } from '../store/app-store';
 import { FileExplorer } from '../editor/FileExplorer';
 import { SearchPanel } from '../panels/SearchPanel/SearchPanel';
 import { GitPanel } from '../panels/GitPanel/GitPanel';
+import { WorkspacePanel } from '../panels/WorkspacePanel/WorkspacePanel';
+import { KnowledgeGraph } from '../panels/KnowledgeGraph/KnowledgeGraph';
 
 const sidebarTabs: { id: SidebarPanel; icon: string; label: string }[] = [
   { id: 'explorer', icon: '📁', label: 'Explorer' },
@@ -11,6 +13,8 @@ const sidebarTabs: { id: SidebarPanel; icon: string; label: string }[] = [
   { id: 'integrations', icon: '🔌', label: 'Integration Hub' },
   { id: 'agent-log', icon: '🤖', label: 'Agent Activity' },
   { id: 'proactive', icon: '💡', label: 'Proactive Feed' },
+  { id: 'knowledge-graph', icon: '🧠', label: 'Knowledge Graph' },
+  { id: 'workspace', icon: '💼', label: 'Workspace' },
 ];
 
 const styles = {
@@ -201,6 +205,8 @@ const ProactiveFeedPanel: React.FC = () => {
   );
 };
 
+const KnowledgeGraphPanel: React.FC = () => <KnowledgeGraph />;
+
 const panelComponents: Record<SidebarPanel, React.FC> = {
   explorer: ExplorerPanel,
   search: SearchPanel,
@@ -208,6 +214,8 @@ const panelComponents: Record<SidebarPanel, React.FC> = {
   integrations: IntegrationsPanel,
   'agent-log': AgentLogPanel,
   proactive: ProactiveFeedPanel,
+  'knowledge-graph': KnowledgeGraphPanel,
+  workspace: WorkspacePanel,
 };
 
 export const Sidebar: React.FC = () => {

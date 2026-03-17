@@ -1,6 +1,8 @@
 import React from 'react';
 import { useAppStore, BottomPanel as BottomPanelType } from '../store/app-store';
 import { Terminal } from '../panels/Terminal/Terminal';
+import { DiffPanel } from '../panels/DiffPanel/DiffPanel';
+import { CodeActionsPanel } from '../panels/CodeActionsPanel/CodeActionsPanel';
 
 const bottomTabs: { id: BottomPanelType; label: string }[] = [
   { id: 'timeline', label: 'Timeline' },
@@ -8,6 +10,8 @@ const bottomTabs: { id: BottomPanelType; label: string }[] = [
   { id: 'traces', label: 'Traces' },
   { id: 'metrics', label: 'Metrics' },
   { id: 'terminal', label: 'Terminal' },
+  { id: 'diff', label: 'Diff' },
+  { id: 'code-actions', label: 'Code Actions' },
 ];
 
 const styles = {
@@ -169,12 +173,17 @@ const MetricsContent: React.FC = () => (
 
 const TerminalContent: React.FC = () => <Terminal />;
 
+const DiffContent: React.FC = () => <DiffPanel />;
+const CodeActionsContent: React.FC = () => <CodeActionsPanel />;
+
 const panelComponents: Record<BottomPanelType, React.FC> = {
   timeline: TimelineContent,
   logs: LogsContent,
   traces: TracesContent,
   metrics: MetricsContent,
   terminal: TerminalContent,
+  diff: DiffContent,
+  'code-actions': CodeActionsContent,
 };
 
 export const BottomPanel: React.FC = () => {

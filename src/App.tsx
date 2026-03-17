@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from './store/app-store';
 import { useRuntimeStore } from './store/runtime-store';
 import { TopBar } from './components/TopBar';
@@ -9,6 +9,8 @@ import { TabBar } from './editor/TabBar';
 import { CommandPalette } from './editor/CommandPalette';
 import { InlinePromptBar, useInlinePrompt } from './editor/InlinePromptBar';
 import { ChatPanel } from './panels/ChatPanel/ChatPanel';
+import { StatusBar } from './components/StatusBar';
+import { getSessionManager } from './store/session-manager';
 
 const styles = {
   root: {
@@ -46,22 +48,6 @@ const styles = {
     height: 200,
     minHeight: 100,
   },
-  connectionIndicator: {
-    position: 'fixed' as const,
-    bottom: 4,
-    left: 8,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    fontSize: 10,
-    color: '#858585',
-    zIndex: 50,
-  },
-  connectionDot: {
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-  },
 };
 
 export const App: React.FC = () => {
@@ -75,15 +61,35 @@ export const App: React.FC = () => {
   } = useAppStore();
 
   const initialize = useRuntimeStore((s) => s.initialize);
-  const connected = useRuntimeStore((s) => s.connected);
 
   const inlinePrompt = useInlinePrompt();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
-  /* ── Initialize runtime on mount ── */
+  /* ── Initialize runtime on mount + restore last session ── */
   useEffect(() => {
-    initialize?.();
+    const init = async () => {
+      await initialize?.();
+      // Restore last session
+      const sessionManager = getSessionManager();
+      const lastSession = await sessionManager.getLastSession();
+      if (lastSession) {
+        await sessionManager.loadSession(lastSession);
+      }
+      // Start auto-save
+      sessionManager.autoSave();
+    };
+    init();
   }, [initialize]);
+
+  /* ── Save session before page unload ── */
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const sessionManager = getSessionManager();
+      sessionManager.saveSessionSync();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   /* ── Global keyboard shortcuts ── */
   useEffect(() => {
@@ -169,16 +175,8 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {/* Connection Status Indicator */}
-      <div style={styles.connectionIndicator}>
-        <div
-          style={{
-            ...styles.connectionDot,
-            backgroundColor: connected ? '#4ec9b0' : '#f44747',
-          }}
-        />
-        <span>{connected ? 'Connected' : 'Disconnected'}</span>
-      </div>
+      {/* Status Bar */}
+      <StatusBar />
 
       {/* Command Palette */}
       <CommandPalette

@@ -1,7 +1,8 @@
-import React, { useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor, languages, Position, CancellationToken } from 'monaco-editor';
 import { useRuntimeStore } from '../store/runtime-store';
+import { EditorContextMenu } from './EditorContextMenu';
 
 /* ── Extension → Monaco language mapping ── */
 const EXT_LANG_MAP: Record<string, string> = {
@@ -108,6 +109,15 @@ export const MonacoCore: React.FC = () => {
   const monacoRef = useRef<any>(null);
   const disposablesRef = useRef<any[]>([]);
   const fimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    selectedText: string;
+    line: number;
+    column: number;
+  }>({ visible: false, x: 0, y: 0, selectedText: '', line: 0, column: 0 });
 
   const activeFilePath = useRuntimeStore((s) => s.activeFilePath);
   const openFiles = useRuntimeStore((s) => s.openFiles);
@@ -358,6 +368,39 @@ export const MonacoCore: React.FC = () => {
         },
       });
 
+      /* Context menu — show Aahi custom menu on right-click */
+      editorInstance.onContextMenu((e: any) => {
+        e.event.preventDefault();
+        e.event.stopPropagation();
+        const selection = editorInstance.getSelection();
+        const selectedText = selection
+          ? editorInstance.getModel()?.getValueInRange(selection) ?? ''
+          : '';
+        const pos = editorInstance.getPosition();
+        setContextMenu({
+          visible: true,
+          x: e.event.posx,
+          y: e.event.posy,
+          selectedText,
+          line: pos?.lineNumber ?? 1,
+          column: pos?.column ?? 1,
+        });
+      });
+
+      /* Listen for editor actions dispatched from context menu */
+      const editorActionHandler = (evt: Event) => {
+        const action = (evt as CustomEvent).detail?.action;
+        if (action && editorInstance.getAction(action)) {
+          editorInstance.getAction(action)?.run();
+        } else if (action) {
+          editorInstance.trigger('aahi-ctx', action, {});
+        }
+      };
+      window.addEventListener('aahi:editor-action', editorActionHandler);
+      disposablesRef.current.push({
+        dispose: () => window.removeEventListener('aahi:editor-action', editorActionHandler),
+      });
+
       /* Debounced FIM trigger on cursor position change */
       editorInstance.onDidChangeCursorPosition(() => {
         if (fimTimerRef.current) clearTimeout(fimTimerRef.current);
@@ -401,16 +444,30 @@ export const MonacoCore: React.FC = () => {
     return <WelcomeScreen />;
   }
 
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu((prev) => ({ ...prev, visible: false }));
+  }, []);
+
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Editor
         key={activeFilePath}
         defaultValue={content}
         language={language}
         theme="vs-dark"
-        options={defaultEditorOptions}
+        options={{ ...defaultEditorOptions, contextmenu: false }}
         onChange={handleChange}
         onMount={handleMount}
+      />
+      <EditorContextMenu
+        visible={contextMenu.visible}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        selectedText={contextMenu.selectedText}
+        filePath={activeFilePath ?? ''}
+        line={contextMenu.line}
+        column={contextMenu.column}
+        onClose={handleCloseContextMenu}
       />
     </div>
   );
