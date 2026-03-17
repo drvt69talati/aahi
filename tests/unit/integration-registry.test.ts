@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { IntegrationRegistry } from '../../src/integrations/registry/integration-registry.js';
-import { GitHubIntegration } from '../../src/integrations/devops/github-integration.js';
-import { KubernetesIntegration } from '../../src/integrations/devops/kubernetes-integration.js';
+import { IntegrationRegistry } from '../../runtime/integrations/registry/integration-registry.js';
+import { GitHubIntegration } from '../../runtime/integrations/devops/github-integration.js';
+import { KubernetesIntegration } from '../../runtime/integrations/devops/kubernetes-integration.js';
 
 describe('IntegrationRegistry', () => {
   let registry: IntegrationRegistry;

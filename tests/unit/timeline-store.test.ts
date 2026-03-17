@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TimelineStore } from '../../src/intelligence/timeline/timeline-store.js';
-import type { TimelineEvent } from '../../src/intelligence/timeline/timeline-store.js';
+import { TimelineStore } from '../../runtime/intelligence/timeline/timeline-store.js';
+import type { TimelineEvent } from '../../runtime/intelligence/timeline/timeline-store.js';
 
 describe('TimelineStore', () => {
   let store: TimelineStore;

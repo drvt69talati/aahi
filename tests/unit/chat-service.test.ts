@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ChatService } from '../../src/ai/chat/chat-service.js';
-import { SlashCommandRouter } from '../../src/ai/chat/slash-command-router.js';
-import { ContextEngine } from '../../src/ai/context/context-engine.js';
-import type { AahiModelAdapter, ModelRequest, ModelChunk, ModelResponse } from '../../src/ai/models/types.js';
+import { ChatService } from '../../runtime/ai/chat/chat-service.js';
+import { SlashCommandRouter } from '../../runtime/ai/chat/slash-command-router.js';
+import { ContextEngine } from '../../runtime/ai/context/context-engine.js';
+import type { AahiModelAdapter, ModelRequest, ModelChunk, ModelResponse } from '../../runtime/ai/models/types.js';
 
 // ─── Mock Model Adapter ──────────────────────────────────────────────────────
 

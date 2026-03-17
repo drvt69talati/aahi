@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { CapabilityRegistry } from '../../src/agents/a2a/capability-registry.js';
-import type { A2AMessage } from '../../src/agents/runtime/types.js';
+import { CapabilityRegistry } from '../../runtime/agents/a2a/capability-registry.js';
+import type { A2AMessage } from '../../runtime/agents/runtime/types.js';
 
 describe('CapabilityRegistry', () => {
   let registry: CapabilityRegistry;

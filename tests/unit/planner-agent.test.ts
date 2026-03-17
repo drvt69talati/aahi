@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { PlannerAgent } from '../../src/agents/planner/planner-agent.js';
-import { CapabilityRegistry } from '../../src/agents/a2a/capability-registry.js';
-import type { ContextChunk } from '../../src/integrations/registry/types.js';
+import { PlannerAgent } from '../../runtime/agents/planner/planner-agent.js';
+import { CapabilityRegistry } from '../../runtime/agents/a2a/capability-registry.js';
+import type { ContextChunk } from '../../runtime/integrations/registry/types.js';
 
 describe('PlannerAgent', () => {
   let registry: CapabilityRegistry;

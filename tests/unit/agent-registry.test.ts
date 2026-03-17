@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AgentRegistry } from '../../src/agents/registry/agent-registry.js';
-import type { AgentDefinition, ExecutionPlan } from '../../src/agents/runtime/types.js';
-import type { ContextChunk } from '../../src/integrations/registry/types.js';
+import { AgentRegistry } from '../../runtime/agents/registry/agent-registry.js';
+import type { AgentDefinition, ExecutionPlan } from '../../runtime/agents/runtime/types.js';
+import type { ContextChunk } from '../../runtime/integrations/registry/types.js';
 
 /** Minimal stub agent for testing */
 function createStubAgent(overrides: Partial<AgentDefinition> & { id: string }): AgentDefinition {

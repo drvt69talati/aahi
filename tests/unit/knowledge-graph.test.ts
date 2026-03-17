@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { KnowledgeGraph } from '../../src/intelligence/teambrain/knowledge-graph.js';
+import { KnowledgeGraph } from '../../runtime/intelligence/teambrain/knowledge-graph.js';
 import type {
   ServiceOwnership,
   ExpertiseEntry,
   ArchitecturalDecision,
   IncidentLearning,
-} from '../../src/intelligence/teambrain/knowledge-graph.js';
+} from '../../runtime/intelligence/teambrain/knowledge-graph.js';
 
 describe('KnowledgeGraph', () => {
   let graph: KnowledgeGraph;

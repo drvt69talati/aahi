@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MentionParser } from '../../src/ai/context/mention-parser.js';
+import { MentionParser } from '../../runtime/ai/context/mention-parser.js';
 
 describe('MentionParser', () => {
   let parser: MentionParser;

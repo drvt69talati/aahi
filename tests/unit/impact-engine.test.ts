@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ImpactEngine } from '../../src/intelligence/impact/impact-engine.js';
-import { KnowledgeGraph } from '../../src/intelligence/teambrain/knowledge-graph.js';
-import { TimelineStore } from '../../src/intelligence/timeline/timeline-store.js';
-import type { ImpactWarning } from '../../src/intelligence/impact/impact-engine.js';
+import { ImpactEngine } from '../../runtime/intelligence/impact/impact-engine.js';
+import { KnowledgeGraph } from '../../runtime/intelligence/teambrain/knowledge-graph.js';
+import { TimelineStore } from '../../runtime/intelligence/timeline/timeline-store.js';
+import type { ImpactWarning } from '../../runtime/intelligence/impact/impact-engine.js';
 
 describe('ImpactEngine', () => {
   let engine: ImpactEngine;

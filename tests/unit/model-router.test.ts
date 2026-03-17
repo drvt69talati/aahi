@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ModelRouter } from '../../src/ai/models/model-router.js';
-import type { ModelConfig } from '../../src/ai/models/types.js';
+import { ModelRouter } from '../../runtime/ai/models/model-router.js';
+import type { ModelConfig } from '../../runtime/ai/models/types.js';
 
 describe('ModelRouter', () => {
   const models: ModelConfig[] = [

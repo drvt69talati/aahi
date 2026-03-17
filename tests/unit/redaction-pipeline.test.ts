@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { RedactionPipeline } from '../../src/ai/redaction/redaction-pipeline.js';
+import { RedactionPipeline } from '../../runtime/ai/redaction/redaction-pipeline.js';
 
 describe('RedactionPipeline', () => {
   let pipeline: RedactionPipeline;

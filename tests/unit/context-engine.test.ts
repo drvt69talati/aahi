@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ContextEngine, type ContextSource } from '../../src/ai/context/context-engine.js';
-import { RedactionPipeline } from '../../src/ai/redaction/redaction-pipeline.js';
+import { ContextEngine, type ContextSource } from '../../runtime/ai/context/context-engine.js';
+import { RedactionPipeline } from '../../runtime/ai/redaction/redaction-pipeline.js';
 
 function makeSource(
   id: string,
