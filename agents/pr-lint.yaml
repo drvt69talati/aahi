@@ -1,0 +1,41 @@
+name: pr-lint
+description: Lint PR titles and descriptions against team conventions
+triggers:
+  - /pr-lint
+  - pr.opened
+required_integrations:
+  - github
+capabilities:
+  - lint.pr
+approval_policy: write_only
+steps:
+  - name: Fetch PR details
+    type: read
+    integration: github
+    action: github.get_pr
+    params:
+      owner: "{{owner}}"
+      repo: "{{repo}}"
+      pull_number: "{{pull_number}}"
+  - name: Analyze PR format
+    type: llm
+    depends_on:
+      - Fetch PR details
+    prompt: |
+      Analyze this PR title and description against these conventions:
+      1. Title must follow conventional commits (feat:, fix:, chore:, etc.)
+      2. Description must include a "## What" section
+      3. Description must include a "## Why" section
+      4. Description must include a "## Testing" section
+      Provide specific feedback and suggestions.
+  - name: Post review comment
+    type: write
+    integration: github
+    action: github.create_pr_comment
+    depends_on:
+      - Analyze PR format
+    params:
+      owner: "{{owner}}"
+      repo: "{{repo}}"
+      pull_number: "{{pull_number}}"
+      body: "{{analysis_result}}"
