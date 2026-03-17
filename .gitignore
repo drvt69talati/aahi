@@ -9,3 +9,4 @@ coverage/
 .vscode/settings.json
 *.tgz
 .turbo/
+release/
