@@ -8,3 +8,4 @@ export type {
   Credential,
   KeychainAdapter,
 } from './auth-manager.js';
+export { EncryptedFileKeychain, InMemoryKeychain } from './keychain-native.js';

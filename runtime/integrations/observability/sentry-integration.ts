@@ -178,8 +178,50 @@ export class SentryIntegration implements AahiIntegration {
   }
 
   async *streamEvents(_handler: EventHandler): AsyncIterable<SystemEvent> {
-    // In production, this would use Sentry webhooks
-    // For now, yield nothing — will be connected to webhook receiver
+    if (!this.token) return;
+
+    const pollIntervalMs = 60_000;
+    let lastSeen = new Date().toISOString();
+
+    while (true) {
+      try {
+        // Fetch recent unresolved issues across all organizations the token has access to
+        // Use the projects endpoint to discover orgs, then poll issues
+        const projects = await this.apiGet('/projects/') as any[];
+        const orgSlugs = [...new Set(projects.map((p: any) => p.organization?.slug).filter(Boolean))];
+
+        for (const org of orgSlugs) {
+          const issues = await this.apiGet(
+            `/organizations/${org}/issues/?query=is:unresolved&sort=date&limit=10`
+          ) as any[];
+
+          for (const issue of issues) {
+            if (new Date(issue.lastSeen) <= new Date(lastSeen)) continue;
+
+            const systemEvent: SystemEvent = {
+              id: issue.id,
+              source: 'sentry',
+              type: 'sentry.issue',
+              timestamp: new Date(issue.lastSeen),
+              data: {
+                title: issue.title,
+                culprit: issue.culprit,
+                level: issue.level,
+                count: issue.count,
+                project: issue.project?.slug,
+              },
+              severity: issue.level === 'fatal' || issue.level === 'error' ? 'error' : 'warning',
+            };
+            yield systemEvent;
+          }
+        }
+
+        lastSeen = new Date().toISOString();
+      } catch {
+        // Continue on errors
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
   }
 
   async healthCheck(): Promise<HealthStatus> {

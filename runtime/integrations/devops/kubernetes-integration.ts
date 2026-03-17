@@ -317,11 +317,40 @@ export class KubernetesIntegration implements AahiIntegration {
   }
 
   async *streamEvents(_handler: EventHandler): AsyncIterable<SystemEvent> {
-    // Watch Kubernetes events via the watch API
-    // In production, this would use the K8s watch API with reconnection
     if (!this.apiServer || !this.token) return;
 
-    // Placeholder: would use /api/v1/events?watch=true
+    const pollIntervalMs = 30_000;
+    let lastSeen = new Date().toISOString();
+
+    while (true) {
+      try {
+        const result = await this.apiGet(
+          `/api/v1/events?fieldSelector=metadata.creationTimestamp>${lastSeen}&limit=50`
+        ) as any;
+        for (const item of result.items ?? []) {
+          const severity = item.type === 'Warning' ? 'warning' as const : 'info' as const;
+          const systemEvent: SystemEvent = {
+            id: item.metadata.uid,
+            source: 'kubernetes',
+            type: `k8s.${item.reason}`,
+            timestamp: new Date(item.lastTimestamp || item.metadata.creationTimestamp),
+            data: {
+              reason: item.reason,
+              message: item.message,
+              involvedObject: item.involvedObject?.name,
+              namespace: item.involvedObject?.namespace,
+              kind: item.involvedObject?.kind,
+            },
+            severity,
+          };
+          yield systemEvent;
+          lastSeen = systemEvent.timestamp.toISOString();
+        }
+      } catch {
+        // Continue on errors
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
   }
 
   async healthCheck(): Promise<HealthStatus> {

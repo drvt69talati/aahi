@@ -224,8 +224,34 @@ export class GitHubIntegration implements AahiIntegration {
   }
 
   async *streamEvents(_handler: EventHandler): AsyncIterable<SystemEvent> {
-    // In production, this would use GitHub webhooks or polling
-    // For now, yield nothing — will be connected to webhook receiver
+    if (!this.token) return;
+
+    let lastEventId = '';
+    const pollIntervalMs = 60_000;
+
+    while (true) {
+      try {
+        const events = await this.apiGet('/events?per_page=30') as any[];
+        for (const event of events) {
+          if (event.id === lastEventId) break;
+          if (!lastEventId) { lastEventId = events[0]?.id; break; } // Skip first batch
+
+          const systemEvent: SystemEvent = {
+            id: event.id,
+            source: 'github',
+            type: `github.${event.type}`,
+            timestamp: new Date(event.created_at),
+            data: { action: event.payload?.action, repo: event.repo?.name },
+            severity: 'info',
+          };
+          yield systemEvent;
+        }
+        if (events.length > 0) lastEventId = events[0].id;
+      } catch {
+        // Silently continue on errors
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
   }
 
   async healthCheck(): Promise<HealthStatus> {

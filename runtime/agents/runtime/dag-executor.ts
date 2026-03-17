@@ -35,6 +35,7 @@ export class DAGExecutor {
    */
   async execute(plan: ExecutionPlan): Promise<ExecutionPlan> {
     this.aborted = false;
+    this.validatePlan(plan);
     plan.status = 'running';
     this.callbacks.onPlanCreated?.(plan);
 
@@ -63,6 +64,65 @@ export class DAGExecutor {
    */
   getActivityLog(): readonly AgentActivityEntry[] {
     return this.activityLog;
+  }
+
+  /**
+   * Validate the execution plan before running.
+   * Checks for cycles, missing dependencies, and invalid step configurations.
+   */
+  private validatePlan(plan: ExecutionPlan): void {
+    const stepIds = new Set(plan.steps.map(s => s.id));
+
+    // Check for missing dependency references
+    for (const step of plan.steps) {
+      for (const dep of step.dependsOn) {
+        if (!stepIds.has(dep)) {
+          throw new Error(
+            `Step "${step.name}" (${step.id}) depends on unknown step "${dep}"`
+          );
+        }
+      }
+      // Validate step has required config for its type
+      if (step.type === 'tool' && !step.toolAction) {
+        throw new Error(`Step "${step.name}" is type "tool" but has no toolAction`);
+      }
+      if (step.type === 'llm' && !step.modelRequest) {
+        throw new Error(`Step "${step.name}" is type "llm" but has no modelRequest`);
+      }
+      if (step.type === 'a2a' && !step.a2aMessage) {
+        throw new Error(`Step "${step.name}" is type "a2a" but has no a2aMessage`);
+      }
+    }
+
+    // Cycle detection using DFS with coloring
+    const WHITE = 0, GRAY = 1, BLACK = 2;
+    const color = new Map<string, number>();
+    for (const step of plan.steps) {
+      color.set(step.id, WHITE);
+    }
+
+    const depsMap = new Map<string, string[]>();
+    for (const step of plan.steps) {
+      depsMap.set(step.id, step.dependsOn);
+    }
+
+    function hasCycle(nodeId: string): boolean {
+      color.set(nodeId, GRAY);
+      for (const dep of depsMap.get(nodeId) ?? []) {
+        if (color.get(dep) === GRAY) return true; // back edge = cycle
+        if (color.get(dep) === WHITE && hasCycle(dep)) return true;
+      }
+      color.set(nodeId, BLACK);
+      return false;
+    }
+
+    for (const step of plan.steps) {
+      if (color.get(step.id) === WHITE && hasCycle(step.id)) {
+        throw new Error(
+          `Cycle detected in execution plan "${plan.id}": step "${step.name}" is part of a dependency cycle`
+        );
+      }
+    }
   }
 
   private async executeSteps(steps: AgentStep[], planId: string): Promise<void> {
@@ -181,6 +241,25 @@ export class DAGExecutor {
         const { sanitized } = this.redactionPipeline.redact(msg.content);
         return { ...msg, content: sanitized };
       }
+      if (Array.isArray(msg.content)) {
+        // Redact text blocks, strip image blocks (images can contain visible secrets)
+        const redactedBlocks = msg.content.map(block => {
+          if (block.type === 'text' && block.text) {
+            const { sanitized } = this.redactionPipeline.redact(block.text);
+            return { ...block, text: sanitized };
+          }
+          if (block.type === 'tool_result' && block.content) {
+            const { sanitized } = this.redactionPipeline.redact(
+              typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+            );
+            return { ...block, content: sanitized };
+          }
+          // Images pass through — can't redact binary data
+          // But we could add a flag to strip images if desired
+          return block;
+        });
+        return { ...msg, content: redactedBlocks };
+      }
       return msg;
     });
 
@@ -234,7 +313,19 @@ export class DAGExecutor {
       timeout: 120_000,
     };
 
-    const actionResult = await integration.executeAction(action, step.toolAction.params, gate);
+    let actionResult = await integration.executeAction(action, step.toolAction.params, gate);
+
+    // Redact sensitive data from the integration response
+    if (actionResult.data) {
+      const dataStr = typeof actionResult.data === 'string'
+        ? actionResult.data
+        : JSON.stringify(actionResult.data);
+      if (this.redactionPipeline.hasSensitiveData(dataStr)) {
+        const { sanitized } = this.redactionPipeline.redact(dataStr);
+        actionResult = { ...actionResult, data: JSON.parse(sanitized) };
+      }
+    }
+
     return {
       success: actionResult.success,
       data: actionResult.data,

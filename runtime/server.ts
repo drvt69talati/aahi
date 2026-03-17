@@ -44,6 +44,7 @@ export class AahiServer {
   private lspExtensions: AahiLSPExtensions;
   private port: number;
   private clients = new Set<WebSocket>();
+  private pendingApprovals = new Map<string, (approved: boolean) => void>();
 
   constructor(config: AahiConfig, rootUri?: string) {
     this.port = parseInt(process.env.AAHI_IPC_PORT ?? '', 10) || DEFAULT_PORT;
@@ -211,6 +212,8 @@ export class AahiServer {
         return this.handleKnowledgeGraph(action, request.params);
       case 'impact':
         return this.handleImpact(action, request.params);
+      case 'approval':
+        return this.handleApproval(action, request.params);
       default:
         throw new Error(`Unknown domain: ${domain}`);
     }
@@ -278,12 +281,36 @@ export class AahiServer {
             } satisfies IPCEvent));
           },
           onApprovalRequired: async (gate) => {
+            // Send approval request to client
             ws.send(JSON.stringify({
               event: 'agent.approvalRequired',
               data: gate,
             } satisfies IPCEvent));
-            // Auto-approve for now — UI should implement approval flow
-            return true;
+
+            // Wait for user response via a Promise that resolves when
+            // the client sends an approval response
+            return new Promise<boolean>((resolve) => {
+              const requestId = gate.actionId;
+
+              // Store the resolver so handleMessage can resolve it
+              this.pendingApprovals.set(requestId, resolve);
+
+              // Auto-decline after timeout
+              const timer = setTimeout(() => {
+                if (this.pendingApprovals.has(requestId)) {
+                  this.pendingApprovals.delete(requestId);
+                  resolve(false); // Auto-decline on timeout
+                }
+              }, gate.timeout || 120_000);
+
+              // Clean up timer when resolved
+              const originalResolve = resolve;
+              this.pendingApprovals.set(requestId, (approved: boolean) => {
+                clearTimeout(timer);
+                this.pendingApprovals.delete(requestId);
+                originalResolve(approved);
+              });
+            });
           },
         });
       }
@@ -432,6 +459,25 @@ export class AahiServer {
         return this.aahi.impactEngine.analyze(params.files as string[]);
       default:
         throw new Error(`Unknown impact action: ${action}`);
+    }
+  }
+
+  private async handleApproval(action: string, params: Record<string, unknown>): Promise<unknown> {
+    switch (action) {
+      case 'respond': {
+        const requestId = params.requestId as string;
+        const approved = params.approved as boolean;
+        const resolver = this.pendingApprovals.get(requestId);
+        if (resolver) {
+          resolver(approved);
+          return { acknowledged: true };
+        }
+        return { acknowledged: false, error: 'No pending approval with that ID' };
+      }
+      case 'pending':
+        return { count: this.pendingApprovals.size };
+      default:
+        throw new Error(`Unknown approval action: ${action}`);
     }
   }
 
