@@ -1,6 +1,6 @@
 {
   "name": "aahi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Aahi — AI-native Software Operations Platform. The IDE that sees your living system.",
   "main": "dist/runtime/index.js",
   "scripts": {
