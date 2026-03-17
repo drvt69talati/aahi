@@ -29,7 +29,7 @@ const EXT_BADGE: Record<string, string> = {
 
 function getExtBadge(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  return EXT_BADGE[ext] ?? ext.toUpperCase().slice(0, 2) || '..';
+  return EXT_BADGE[ext] ?? (ext.toUpperCase().slice(0, 2) || '..');
 }
 
 function getFileName(filePath: string): string {
