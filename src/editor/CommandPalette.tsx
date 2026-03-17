@@ -143,25 +143,43 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
 
   const appStore = useAppStore();
 
+  /* ── Helper: open agent in chat panel ── */
+  const runSlashAgent = useCallback(
+    (agentId: string) => {
+      const store = useRuntimeStore.getState();
+      store.runAgent(agentId, '');
+      // Open chat panel so user sees the agent output
+      appStore.toggleRightPanel();
+    },
+    [appStore],
+  );
+
   /* ── Build command list ── */
   const commands: Command[] = useMemo(
     () => [
-      // Slash commands
-      { id: '/debug', label: '/debug', category: 'slash' as const, action: () => console.log('[Aahi] /debug') },
-      { id: '/deploy', label: '/deploy', category: 'slash' as const, action: () => console.log('[Aahi] /deploy') },
-      { id: '/review', label: '/review', category: 'slash' as const, action: () => console.log('[Aahi] /review') },
-      { id: '/security', label: '/security', category: 'slash' as const, action: () => console.log('[Aahi] /security') },
-      { id: '/incident', label: '/incident', category: 'slash' as const, action: () => console.log('[Aahi] /incident') },
-      { id: '/cost', label: '/cost', category: 'slash' as const, action: () => console.log('[Aahi] /cost') },
-      { id: '/query', label: '/query', category: 'slash' as const, action: () => console.log('[Aahi] /query') },
-      { id: '/impact', label: '/impact', category: 'slash' as const, action: () => console.log('[Aahi] /impact') },
-      { id: '/timeline', label: '/timeline', category: 'slash' as const, action: () => console.log('[Aahi] /timeline') },
-      { id: '/who-owns', label: '/who-owns', category: 'slash' as const, action: () => console.log('[Aahi] /who-owns') },
-      { id: '/onboard', label: '/onboard', category: 'slash' as const, action: () => console.log('[Aahi] /onboard') },
-      { id: '/flag', label: '/flag', category: 'slash' as const, action: () => console.log('[Aahi] /flag') },
-      { id: '/release', label: '/release', category: 'slash' as const, action: () => console.log('[Aahi] /release') },
-      { id: '/oncall', label: '/oncall', category: 'slash' as const, action: () => console.log('[Aahi] /oncall') },
-      { id: '/scaffold', label: '/scaffold', category: 'slash' as const, action: () => console.log('[Aahi] /scaffold') },
+      // Slash commands — each launches an agent via runtime store
+      { id: '/debug', label: '/debug', category: 'slash' as const, action: () => runSlashAgent('debug') },
+      { id: '/deploy', label: '/deploy', category: 'slash' as const, action: () => runSlashAgent('deploy') },
+      { id: '/review', label: '/review', category: 'slash' as const, action: () => runSlashAgent('review') },
+      { id: '/security', label: '/security', category: 'slash' as const, action: () => runSlashAgent('security') },
+      { id: '/incident', label: '/incident', category: 'slash' as const, action: () => runSlashAgent('incident') },
+      { id: '/cost', label: '/cost', category: 'slash' as const, action: () => runSlashAgent('cost') },
+      { id: '/query', label: '/query', category: 'slash' as const, action: () => runSlashAgent('query') },
+      { id: '/impact', label: '/impact', category: 'slash' as const, action: () => runSlashAgent('impact') },
+      {
+        id: '/timeline',
+        label: '/timeline',
+        category: 'slash' as const,
+        action: () => {
+          appStore.setBottomPanel('timeline');
+        },
+      },
+      { id: '/who-owns', label: '/who-owns', category: 'slash' as const, action: () => runSlashAgent('who-owns') },
+      { id: '/onboard', label: '/onboard', category: 'slash' as const, action: () => runSlashAgent('onboard') },
+      { id: '/flag', label: '/flag', category: 'slash' as const, action: () => runSlashAgent('flag') },
+      { id: '/release', label: '/release', category: 'slash' as const, action: () => runSlashAgent('release') },
+      { id: '/oncall', label: '/oncall', category: 'slash' as const, action: () => runSlashAgent('oncall') },
+      { id: '/scaffold', label: '/scaffold', category: 'slash' as const, action: () => runSlashAgent('scaffold') },
 
       // Editor commands
       {
@@ -189,7 +207,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           });
         },
       },
-      { id: 'editor.format', label: 'Format Document', shortcut: 'Shift+Alt+F', category: 'editor' as const, action: () => console.log('[Aahi] Format') },
+      {
+        id: 'editor.format',
+        label: 'Format Document',
+        shortcut: 'Shift+Alt+F',
+        category: 'editor' as const,
+        action: () => {
+          // Trigger Monaco's built-in format action via DOM
+          const editorAction = document.querySelector('.monaco-editor');
+          if (editorAction) {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', shiftKey: true, altKey: true }));
+          }
+        },
+      },
       {
         id: 'editor.toggleSidebar',
         label: 'Toggle Sidebar',
@@ -213,8 +243,38 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       },
 
       // File commands
-      { id: 'file.open', label: 'Open File', shortcut: 'Cmd+O', category: 'file' as const, action: () => console.log('[Aahi] Open File') },
-      { id: 'file.new', label: 'New File', shortcut: 'Cmd+N', category: 'file' as const, action: () => console.log('[Aahi] New File') },
+      {
+        id: 'file.open',
+        label: 'Open File',
+        shortcut: 'Cmd+O',
+        category: 'file' as const,
+        action: () => {
+          // Open the explorer sidebar so the user can pick a file
+          appStore.setSidebarPanel('explorer');
+        },
+      },
+      {
+        id: 'file.new',
+        label: 'New File',
+        shortcut: 'Cmd+N',
+        category: 'file' as const,
+        action: () => {
+          // Create an untitled file in the editor
+          const state = useRuntimeStore.getState();
+          const untitledPath = `untitled-${Date.now()}`;
+          const files = new Map(state.openFiles);
+          files.set(untitledPath, {
+            path: untitledPath,
+            content: '',
+            language: 'plaintext',
+            dirty: true,
+          });
+          useRuntimeStore.setState({
+            openFiles: files,
+            activeFilePath: untitledPath,
+          });
+        },
+      },
       {
         id: 'file.close',
         label: 'Close File',
@@ -249,9 +309,44 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         category: 'view' as const,
         action: () => appStore.toggleFocusMode(),
       },
-      { id: 'view.settings', label: 'Settings', shortcut: 'Cmd+,', category: 'view' as const, action: () => console.log('[Aahi] Settings') },
+      {
+        id: 'view.explorer',
+        label: 'Show Explorer',
+        category: 'view' as const,
+        action: () => appStore.setSidebarPanel('explorer'),
+      },
+      {
+        id: 'view.search',
+        label: 'Search in Files',
+        shortcut: 'Cmd+Shift+F',
+        category: 'view' as const,
+        action: () => appStore.setSidebarPanel('search'),
+      },
+      {
+        id: 'view.git',
+        label: 'Source Control',
+        category: 'view' as const,
+        action: () => appStore.setSidebarPanel('git'),
+      },
+      {
+        id: 'view.terminal',
+        label: 'Terminal',
+        shortcut: 'Cmd+`',
+        category: 'view' as const,
+        action: () => appStore.setBottomPanel('terminal'),
+      },
+      {
+        id: 'view.settings',
+        label: 'Settings',
+        shortcut: 'Cmd+,',
+        category: 'view' as const,
+        action: () => {
+          // Open integrations panel as a settings proxy
+          appStore.setSidebarPanel('integrations');
+        },
+      },
     ],
-    [appStore]
+    [appStore, runSlashAgent],
   );
 
   /* ── Filter commands ── */

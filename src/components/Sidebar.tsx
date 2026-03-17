@@ -1,9 +1,13 @@
 import React from 'react';
 import { useAppStore, SidebarPanel } from '../store/app-store';
 import { FileExplorer } from '../editor/FileExplorer';
+import { SearchPanel } from '../panels/SearchPanel/SearchPanel';
+import { GitPanel } from '../panels/GitPanel/GitPanel';
 
 const sidebarTabs: { id: SidebarPanel; icon: string; label: string }[] = [
   { id: 'explorer', icon: '📁', label: 'Explorer' },
+  { id: 'search', icon: '🔍', label: 'Search' },
+  { id: 'git', icon: '🔀', label: 'Source Control' },
   { id: 'integrations', icon: '🔌', label: 'Integration Hub' },
   { id: 'agent-log', icon: '🤖', label: 'Agent Activity' },
   { id: 'proactive', icon: '💡', label: 'Proactive Feed' },
@@ -199,6 +203,8 @@ const ProactiveFeedPanel: React.FC = () => {
 
 const panelComponents: Record<SidebarPanel, React.FC> = {
   explorer: ExplorerPanel,
+  search: SearchPanel,
+  git: GitPanel,
   integrations: IntegrationsPanel,
   'agent-log': AgentLogPanel,
   proactive: ProactiveFeedPanel,

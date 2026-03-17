@@ -100,8 +100,21 @@ export class AahiServer {
 
   async start(): Promise<void> {
     return new Promise((resolve) => {
-      this.wss = new WebSocketServer({ port: this.port }, () => {
+      this.wss = new WebSocketServer({ port: this.port }, async () => {
         console.log(`[aahi] Intelligence Runtime listening on ws://localhost:${this.port}`);
+
+        // Start LSP servers
+        try {
+          await this.lspManager.startAll();
+          console.log('[aahi] LSP servers started');
+        } catch (err: unknown) {
+          console.warn('[aahi] Some LSP servers failed to start:', err instanceof Error ? err.message : err);
+        }
+
+        // Start proactive agent
+        this.aahi.startProactive();
+        console.log('[aahi] Proactive agent started');
+
         resolve();
       });
 
@@ -281,34 +294,25 @@ export class AahiServer {
             } satisfies IPCEvent));
           },
           onApprovalRequired: async (gate) => {
-            // Send approval request to client
             ws.send(JSON.stringify({
               event: 'agent.approvalRequired',
               data: gate,
             } satisfies IPCEvent));
 
-            // Wait for user response via a Promise that resolves when
-            // the client sends an approval response
             return new Promise<boolean>((resolve) => {
               const requestId = gate.actionId;
+              const timeoutMs = gate.timeout || 120_000;
 
-              // Store the resolver so handleMessage can resolve it
-              this.pendingApprovals.set(requestId, resolve);
-
-              // Auto-decline after timeout
+              // Set up auto-decline timer
               const timer = setTimeout(() => {
-                if (this.pendingApprovals.has(requestId)) {
-                  this.pendingApprovals.delete(requestId);
-                  resolve(false); // Auto-decline on timeout
-                }
-              }, gate.timeout || 120_000);
+                this.pendingApprovals.delete(requestId);
+                resolve(false);
+              }, timeoutMs);
 
-              // Clean up timer when resolved
-              const originalResolve = resolve;
+              // Store resolver that also clears the timer
               this.pendingApprovals.set(requestId, (approved: boolean) => {
                 clearTimeout(timer);
-                this.pendingApprovals.delete(requestId);
-                originalResolve(approved);
+                resolve(approved);
               });
             });
           },

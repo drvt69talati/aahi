@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type SidebarPanel = 'explorer' | 'integrations' | 'agent-log' | 'proactive';
+export type SidebarPanel = 'explorer' | 'search' | 'git' | 'integrations' | 'agent-log' | 'proactive';
 export type BottomPanel = 'timeline' | 'logs' | 'traces' | 'metrics' | 'terminal';
 
 interface AppState {

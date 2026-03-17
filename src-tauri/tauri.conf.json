@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/schemas/main/tauri/tauri.conf.json",
   "productName": "Aahi",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "identifier": "dev.aahi.ide",
   "build": {
     "frontendDist": "../dist/ui",

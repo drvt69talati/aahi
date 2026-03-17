@@ -113,7 +113,7 @@ interface RuntimeState {
   // File system
   workspaceRoot: string;
   fileTree: FileEntry[];
-  openFiles: OpenFile[];
+  openFiles: Map<string, OpenFile>;
   activeFilePath: string | null;
 
   // Integrations
@@ -240,7 +240,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   proactiveAlerts: [],
   workspaceRoot: '',
   fileTree: [],
-  openFiles: [],
+  openFiles: new Map(),
   activeFilePath: null,
   integrations: [],
 
@@ -365,6 +365,14 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         await get().loadIntegrations();
       } catch {
         // Non-critical — integrations can load later
+      }
+
+      // Load workspace file tree
+      try {
+        const cwd = isTauri() ? '.' : process.cwd?.() ?? '.';
+        await get().loadFileTree(cwd);
+      } catch {
+        // Non-critical — file tree loads on demand
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to runtime';
@@ -505,8 +513,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
 
   openFile: async (path: string) => {
     // Check if already open
-    const existing = get().openFiles.find((f) => f.path === path);
-    if (existing) {
+    if (get().openFiles.has(path)) {
       set({ activeFilePath: path });
       return;
     }
@@ -514,10 +521,11 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     try {
       const content = await tauri.readFile(path);
       const language = guessLanguage(path);
-      set((s) => ({
-        openFiles: [...s.openFiles, { path, content, language, dirty: false }],
-        activeFilePath: path,
-      }));
+      set((s) => {
+        const files = new Map(s.openFiles);
+        files.set(path, { path, content, language, dirty: false });
+        return { openFiles: files, activeFilePath: path };
+      });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : `Failed to open ${path}`;
       set({ error: errorMsg });
@@ -527,11 +535,14 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   saveFile: async (path: string, content: string) => {
     try {
       await tauri.writeFile(path, content);
-      set((s) => ({
-        openFiles: s.openFiles.map((f) =>
-          f.path === path ? { ...f, content, dirty: false } : f,
-        ),
-      }));
+      set((s) => {
+        const files = new Map(s.openFiles);
+        const existing = files.get(path);
+        if (existing) {
+          files.set(path, { ...existing, content, dirty: false });
+        }
+        return { openFiles: files };
+      });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : `Failed to save ${path}`;
       set({ error: errorMsg });

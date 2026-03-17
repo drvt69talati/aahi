@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore, BottomPanel as BottomPanelType } from '../store/app-store';
+import { Terminal } from '../panels/Terminal/Terminal';
 
 const bottomTabs: { id: BottomPanelType; label: string }[] = [
   { id: 'timeline', label: 'Timeline' },
@@ -166,17 +167,7 @@ const MetricsContent: React.FC = () => (
   </div>
 );
 
-const TerminalContent: React.FC = () => (
-  <div style={styles.content}>
-    <div style={{ color: '#4ec9b0' }}>~/my-project $</div>
-    <div style={{ padding: '4px 0', color: '#858585' }}>
-      Terminal emulator — connect to system shell or Tauri backend
-    </div>
-    <div style={{ color: '#4ec9b0', marginTop: 8 }}>
-      ~/my-project $ <span style={{ color: '#cccccc', opacity: 0.5 }}>|</span>
-    </div>
-  </div>
-);
+const TerminalContent: React.FC = () => <Terminal />;
 
 const panelComponents: Record<BottomPanelType, React.FC> = {
   timeline: TimelineContent,
