@@ -81,8 +81,10 @@ function detectLanguage(uri: string): string {
 // ─── Symbol Extraction ──────────────────────────────────────────────────────
 
 const SYMBOL_PATTERNS: RegExp[] = [
-  // TypeScript / JavaScript
+  // TypeScript / JavaScript — declarations
   /(?:export\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/g,
+  // TypeScript / JavaScript — method declarations (async methodName(), methodName())
+  /(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w+)?\s*\{/g,
   // Python
   /(?:def|class)\s+(\w+)/g,
   // Go
@@ -100,7 +102,7 @@ function extractSymbols(content: string): string[] {
     const regex = new RegExp(pattern.source, pattern.flags);
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
-      if (match[1] && match[1].length > 1) {
+      if (match[1] && match[1].length >= 1) {
         symbols.add(match[1]);
       }
     }

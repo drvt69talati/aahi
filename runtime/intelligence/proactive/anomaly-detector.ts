@@ -145,7 +145,9 @@ export class AnomalyDetector {
   // ─── Detection Algorithms ──────────────────────────────────────────────
 
   private detectForType(type: AnomalyType, samples: TimeSample[]): AnomalySignal | null {
-    if (samples.length < 2) return null;
+    if (samples.length === 0) return null;
+    // Most detectors need >=2 samples; cert_expiry/stale_pr/deploy_health work with 1
+    if (samples.length < 2 && !['cert_expiry', 'stale_pr', 'deploy_health'].includes(type)) return null;
 
     switch (type) {
       case 'error_rate_spike':
