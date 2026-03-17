@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
+type GateStatus = 'pending' | 'approved' | 'declined';
 
-interface ApprovalGateProps {
+interface ApprovalGate {
+  requestId: string;
   action: string;
   integration: string;
   riskLevel: RiskLevel;
   params: Record<string, unknown>;
+  timeout?: number; // seconds
+}
+
+interface ApprovalGateProps {
+  gate: ApprovalGate;
   onApprove: () => void;
   onDecline: () => void;
 }
@@ -134,27 +141,75 @@ const styles = {
     color: '#f44747',
     marginTop: 4,
   },
+  timer: {
+    fontSize: 11,
+    color: '#cca700',
+    marginLeft: 8,
+  },
+  resolvedBanner: {
+    padding: '8px 12px',
+    borderRadius: 4,
+    fontSize: 13,
+    fontWeight: 600 as const,
+    textAlign: 'center' as const,
+    marginTop: 8,
+  },
 };
 
 export const ApprovalGateCard: React.FC<ApprovalGateProps> = ({
-  action,
-  integration,
-  riskLevel,
-  params,
+  gate,
   onApprove,
   onDecline,
 }) => {
   const [showParams, setShowParams] = useState(false);
   const [confirmText, setConfirmText] = useState('');
-  const isCritical = riskLevel === 'critical';
+  const [status, setStatus] = useState<GateStatus>('pending');
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(
+    gate.timeout ?? null
+  );
+
+  const isCritical = gate.riskLevel === 'critical';
   const confirmPhrase = 'CONFIRM';
   const canApprove = isCritical ? confirmText === confirmPhrase : true;
+
+  // Countdown timer
+  useEffect(() => {
+    if (secondsLeft === null || secondsLeft <= 0 || status !== 'pending') return;
+
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(interval);
+          // Auto-decline on timeout
+          setStatus('declined');
+          onDecline();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [secondsLeft, status, onDecline]);
+
+  const handleApprove = useCallback(() => {
+    if (!canApprove || status !== 'pending') return;
+    setStatus('approved');
+    onApprove();
+  }, [canApprove, status, onApprove]);
+
+  const handleDecline = useCallback(() => {
+    if (status !== 'pending') return;
+    setStatus('declined');
+    onDecline();
+  }, [status, onDecline]);
 
   return (
     <div
       style={{
         ...styles.card,
-        borderLeft: `3px solid ${riskColors[riskLevel]}`,
+        borderLeft: `3px solid ${riskColors[gate.riskLevel]}`,
+        opacity: status !== 'pending' ? 0.7 : 1,
       }}
     >
       <div style={styles.header}>
@@ -162,63 +217,98 @@ export const ApprovalGateCard: React.FC<ApprovalGateProps> = ({
         <span
           style={{
             ...styles.riskBadge,
-            backgroundColor: riskColors[riskLevel] + '22',
-            color: riskColors[riskLevel],
+            backgroundColor: riskColors[gate.riskLevel] + '22',
+            color: riskColors[gate.riskLevel],
           }}
         >
-          {riskLabels[riskLevel]}
+          {riskLabels[gate.riskLevel]}
         </span>
       </div>
 
       <div style={styles.row}>
         <span style={styles.label}>Action:</span>
-        <span style={styles.value}>{action}</span>
+        <span style={styles.value}>{gate.action}</span>
       </div>
       <div style={styles.row}>
         <span style={styles.label}>Integration:</span>
-        <span style={styles.value}>{integration}</span>
+        <span style={styles.value}>{gate.integration}</span>
       </div>
 
       {showParams && (
-        <div style={styles.paramsBox}>{JSON.stringify(params, null, 2)}</div>
+        <div style={styles.paramsBox}>{JSON.stringify(gate.params, null, 2)}</div>
       )}
 
-      {isCritical && (
+      {status === 'pending' && (
         <>
-          <div style={styles.confirmHint}>
-            Type "{confirmPhrase}" to approve this critical action
+          {isCritical && (
+            <>
+              <div style={styles.confirmHint}>
+                Type "{confirmPhrase}" to approve this critical action
+              </div>
+              <input
+                style={styles.confirmInput}
+                placeholder={`Type ${confirmPhrase} to continue`}
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+              />
+            </>
+          )}
+
+          <div style={styles.actions}>
+            <button
+              style={{
+                ...styles.approveBtn,
+                opacity: canApprove ? 1 : 0.4,
+                cursor: canApprove ? 'pointer' : 'not-allowed',
+              }}
+              onClick={handleApprove}
+              disabled={!canApprove}
+            >
+              Approve
+            </button>
+            <button style={styles.declineBtn} onClick={handleDecline}>
+              Decline
+            </button>
+            <button
+              style={styles.viewParamsBtn}
+              onClick={() => setShowParams(!showParams)}
+            >
+              {showParams ? 'Hide' : 'View'} Params
+            </button>
+            {secondsLeft !== null && secondsLeft > 0 && (
+              <span style={styles.timer}>
+                {secondsLeft}s remaining
+              </span>
+            )}
           </div>
-          <input
-            style={styles.confirmInput}
-            placeholder={`Type ${confirmPhrase} to continue`}
-            value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
-          />
         </>
       )}
 
-      <div style={styles.actions}>
-        <button
+      {status === 'approved' && (
+        <div
           style={{
-            ...styles.approveBtn,
-            opacity: canApprove ? 1 : 0.4,
-            cursor: canApprove ? 'pointer' : 'not-allowed',
+            ...styles.resolvedBanner,
+            backgroundColor: '#4ec9b022',
+            color: '#4ec9b0',
+            border: '1px solid #4ec9b044',
           }}
-          onClick={canApprove ? onApprove : undefined}
-          disabled={!canApprove}
         >
-          Approve
-        </button>
-        <button style={styles.declineBtn} onClick={onDecline}>
-          Decline
-        </button>
-        <button
-          style={styles.viewParamsBtn}
-          onClick={() => setShowParams(!showParams)}
+          {'\u2713'} Approved
+        </div>
+      )}
+
+      {status === 'declined' && (
+        <div
+          style={{
+            ...styles.resolvedBanner,
+            backgroundColor: '#f4474722',
+            color: '#f44747',
+            border: '1px solid #f4474744',
+          }}
         >
-          {showParams ? 'Hide' : 'View'} Params
-        </button>
-      </div>
+          {'\u2717'} Declined
+        </div>
+      )}
     </div>
   );
 };

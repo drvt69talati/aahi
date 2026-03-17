@@ -1,25 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useRuntimeStore } from '../../store/runtime-store';
 
 type IntegrationCategory = 'DevOps' | 'Observability' | 'Collaboration' | 'Infrastructure' | 'Security' | 'Other';
 type IntegrationStatus = 'connected' | 'disconnected' | 'error';
 type HealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
-
-interface Integration {
-  id: string;
-  name: string;
-  icon: string;
-  category: IntegrationCategory;
-  status: IntegrationStatus;
-  health: HealthStatus;
-  description: string;
-}
-
-interface IntegrationHubProps {
-  integrations: Integration[];
-  onConnect: (integrationId: string) => void;
-  onDisconnect: (integrationId: string) => void;
-  onConfigure: (integrationId: string) => void;
-}
 
 const statusColors: Record<IntegrationStatus, string> = {
   connected: '#4ec9b0',
@@ -113,7 +97,7 @@ const styles = {
     overflowY: 'auto' as const,
     padding: 12,
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(220, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
     gap: 12,
     alignContent: 'start' as const,
   },
@@ -217,6 +201,41 @@ const styles = {
     marginBottom: 20,
     lineHeight: '1.6',
   },
+  modalInput: {
+    width: '100%',
+    padding: '8px 10px',
+    backgroundColor: '#1e1e1e',
+    border: '1px solid #3e3e42',
+    borderRadius: 4,
+    color: '#cccccc',
+    fontSize: 13,
+    fontFamily: 'inherit',
+    outline: 'none',
+    boxSizing: 'border-box' as const,
+    marginBottom: 12,
+  },
+  modalLabel: {
+    fontSize: 12,
+    color: '#858585',
+    marginBottom: 6,
+    display: 'block' as const,
+  },
+  modalActions: {
+    display: 'flex',
+    gap: 8,
+    marginTop: 8,
+  },
+  modalConnectBtn: {
+    padding: '6px 20px',
+    backgroundColor: '#007acc',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: 4,
+    fontSize: 12,
+    fontWeight: 600 as const,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
   modalCloseBtn: {
     padding: '6px 16px',
     backgroundColor: '#3e3e42',
@@ -227,19 +246,59 @@ const styles = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
+  loadingState: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    color: '#858585',
+    fontSize: 13,
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    color: '#858585',
+    fontSize: 13,
+    gap: 8,
+  },
 };
 
-export const IntegrationHub: React.FC<IntegrationHubProps> = ({
-  integrations,
-  onConnect,
-  onDisconnect,
-  onConfigure,
-}) => {
+export const IntegrationHub: React.FC = () => {
+  const integrations = useRuntimeStore((s) => s.integrations);
+  const connectIntegration = useRuntimeStore((s) => s.connectIntegration);
+  const loadIntegrations = useRuntimeStore((s) => s.loadIntegrations);
+  const connected = useRuntimeStore((s) => s.connected);
+
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<IntegrationCategory | 'All'>('All');
-  const [configModal, setConfigModal] = useState<string | null>(null);
+  const [connectModal, setConnectModal] = useState<string | null>(null);
+  const [tokenValue, setTokenValue] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
 
-  const filtered = integrations.filter((integ) => {
+  // Load integrations on mount
+  useEffect(() => {
+    if (connected) {
+      setLoading(true);
+      loadIntegrations().finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, [connected, loadIntegrations]);
+
+  // Map IntegrationInfo (connected: boolean) to display-friendly status
+  const integrationItems = (integrations || []).map((integ) => ({
+    ...integ,
+    status: (integ.connected ? 'connected' : 'disconnected') as IntegrationStatus,
+    category: ((integ as Record<string, unknown>).category || 'Other') as IntegrationCategory,
+    description: ((integ as Record<string, unknown>).description || '') as string,
+    icon: ((integ as Record<string, unknown>).icon || '\u2699') as string,
+  }));
+
+  const filtered = integrationItems.filter((integ) => {
     const matchesSearch =
       integ.name.toLowerCase().includes(search.toLowerCase()) ||
       integ.description.toLowerCase().includes(search.toLowerCase());
@@ -247,15 +306,52 @@ export const IntegrationHub: React.FC<IntegrationHubProps> = ({
     return matchesSearch && matchesCategory;
   });
 
-  const modalIntegration = integrations.find((i) => i.id === configModal);
+  const modalIntegration = integrationItems.find((i) => i.id === connectModal);
+
+  const handleConnect = async () => {
+    if (!connectModal || !tokenValue.trim()) return;
+    setConnecting(true);
+    try {
+      await connectIntegration(connectModal, { token: tokenValue.trim() });
+      setConnectModal(null);
+      setTokenValue('');
+    } catch (err) {
+      console.error('Failed to connect integration:', err);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async (integrationId: string) => {
+    try {
+      // Use runtime request for disconnect if available
+      const store = useRuntimeStore.getState();
+      if ('disconnectIntegration' in store && typeof (store as Record<string, unknown>).disconnectIntegration === 'function') {
+        await ((store as Record<string, unknown>).disconnectIntegration as (id: string) => Promise<void>)(integrationId);
+      }
+    } catch (err) {
+      console.error('Failed to disconnect:', err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <span style={styles.headerTitle}>Integration Hub</span>
+        </div>
+        <div style={styles.loadingState}>Loading integrations...</div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <span style={styles.headerTitle}>Integration Hub</span>
         <span style={{ fontSize: 11, color: '#858585' }}>
-          {integrations.filter((i) => i.status === 'connected').length}/{integrations.length}{' '}
-          connected
+          {integrationItems.filter((i) => i.status === 'connected').length}/
+          {integrationItems.length} connected
         </span>
       </div>
 
@@ -292,78 +388,116 @@ export const IntegrationHub: React.FC<IntegrationHubProps> = ({
         ))}
       </div>
 
-      <div style={styles.grid}>
-        {filtered.map((integ) => (
-          <div
-            key={integ.id}
-            style={{
-              ...styles.card,
-              borderColor: integ.status === 'connected' ? '#3e3e42' : '#3e3e42',
-            }}
-            onClick={() => {
-              setConfigModal(integ.id);
-              onConfigure(integ.id);
-            }}
-          >
-            <div style={styles.cardHeader}>
-              <div style={styles.cardIcon}>{integ.icon}</div>
-              <span style={styles.cardName}>{integ.name}</span>
-              <div
-                style={{
-                  ...styles.statusDot,
-                  backgroundColor: statusColors[integ.status],
-                }}
-              />
-            </div>
-            <div style={styles.cardCategory}>{integ.category}</div>
-            <div style={styles.cardDescription}>{integ.description}</div>
-            <div style={styles.cardFooter}>
-              {integ.status === 'connected' && (
-                <span
+      {filtered.length === 0 ? (
+        <div style={styles.emptyState}>
+          <span>No integrations found</span>
+          {!connected && (
+            <span style={{ fontSize: 11 }}>Connect to runtime to load integrations</span>
+          )}
+        </div>
+      ) : (
+        <div style={styles.grid}>
+          {filtered.map((integ) => (
+            <div
+              key={integ.id}
+              style={styles.card}
+              onClick={() => {
+                if (integ.status !== 'connected') {
+                  setConnectModal(integ.id);
+                }
+              }}
+            >
+              <div style={styles.cardHeader}>
+                <div style={styles.cardIcon}>{integ.icon || '\u2699'}</div>
+                <span style={styles.cardName}>{integ.name}</span>
+                <div
                   style={{
-                    ...styles.healthBadge,
-                    backgroundColor: healthColors[integ.health] + '22',
-                    color: healthColors[integ.health],
+                    ...styles.statusDot,
+                    backgroundColor: statusColors[integ.status as IntegrationStatus] || '#858585',
+                  }}
+                />
+              </div>
+              <div style={styles.cardCategory}>{integ.category}</div>
+              <div style={styles.cardDescription}>{integ.description}</div>
+              <div style={styles.cardFooter}>
+                {integ.status === 'connected' ? (
+                  <span
+                    style={{
+                      ...styles.healthBadge,
+                      backgroundColor: healthColors[(integ.health as HealthStatus) || 'unknown'] + '22',
+                      color: healthColors[(integ.health as HealthStatus) || 'unknown'],
+                    }}
+                  >
+                    {healthLabels[(integ.health as HealthStatus) || 'unknown']}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <button
+                  style={{
+                    ...styles.connectBtn,
+                    backgroundColor:
+                      integ.status === 'connected' ? '#3e3e42' : '#007acc',
+                    color: integ.status === 'connected' ? '#cccccc' : '#ffffff',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (integ.status === 'connected') {
+                      handleDisconnect(integ.id);
+                    } else {
+                      setConnectModal(integ.id);
+                    }
                   }}
                 >
-                  {healthLabels[integ.health]}
-                </span>
-              )}
-              {integ.status !== 'connected' && <span />}
-              <button
-                style={{
-                  ...styles.connectBtn,
-                  backgroundColor:
-                    integ.status === 'connected' ? '#3e3e42' : '#007acc',
-                  color: integ.status === 'connected' ? '#cccccc' : '#ffffff',
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  integ.status === 'connected'
-                    ? onDisconnect(integ.id)
-                    : onConnect(integ.id);
-                }}
-              >
-                {integ.status === 'connected' ? 'Disconnect' : 'Connect'}
-              </button>
+                  {integ.status === 'connected' ? 'Disconnect' : 'Connect'}
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {configModal && modalIntegration && (
-        <div style={styles.modal} onClick={() => setConfigModal(null)}>
+      {/* Connect Modal */}
+      {connectModal && modalIntegration && (
+        <div style={styles.modal} onClick={() => setConnectModal(null)}>
           <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalTitle}>
-              {modalIntegration.icon} {modalIntegration.name}
+              Connect {modalIntegration.name}
             </div>
             <div style={styles.modalText}>
-              Configure your {modalIntegration.name} integration settings here. This is a
-              placeholder for the configuration form.
+              Enter your API key or token to connect {modalIntegration.name}.
             </div>
-            <button style={styles.modalCloseBtn} onClick={() => setConfigModal(null)}>
-              Close
-            </button>
+            <label style={styles.modalLabel}>API Key / Token</label>
+            <input
+              style={styles.modalInput}
+              type="password"
+              placeholder="Enter API key or token..."
+              value={tokenValue}
+              onChange={(e) => setTokenValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+              autoFocus
+            />
+            <div style={styles.modalActions}>
+              <button
+                style={{
+                  ...styles.modalConnectBtn,
+                  opacity: connecting || !tokenValue.trim() ? 0.5 : 1,
+                }}
+                onClick={handleConnect}
+                disabled={connecting || !tokenValue.trim()}
+              >
+                {connecting ? 'Connecting...' : 'Connect'}
+              </button>
+              <button
+                style={styles.modalCloseBtn}
+                onClick={() => {
+                  setConnectModal(null);
+                  setTokenValue('');
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/app-store';
+import { useRuntimeStore } from '../../store/runtime-store';
+import { tauri, isTauri } from '../../bridge';
 
 type SettingsSection = 'model' | 'integrations' | 'agents' | 'redaction' | 'privacy';
 
@@ -13,13 +15,6 @@ interface RedactionPattern {
   pattern: string;
   enabled: boolean;
   isCustom: boolean;
-}
-
-interface SettingsProps {
-  agents?: AgentConfig[];
-  redactionPatterns?: RedactionPattern[];
-  onSave?: (settings: Record<string, unknown>) => void;
-  onReset?: () => void;
 }
 
 const sectionLabels: Record<SettingsSection, string> = {
@@ -225,6 +220,42 @@ const styles = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
+  connectionStatus: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 12px',
+    backgroundColor: '#2d2d2d',
+    borderRadius: 4,
+    border: '1px solid #3e3e42',
+    marginBottom: 12,
+    maxWidth: 400,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#cccccc',
+  },
+  saveStatus: {
+    fontSize: 11,
+    marginRight: 8,
+  },
+  integrationLink: {
+    padding: '6px 12px',
+    backgroundColor: '#007acc22',
+    color: '#007acc',
+    border: '1px solid #007acc44',
+    borderRadius: 4,
+    fontSize: 12,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    display: 'inline-block',
+    marginTop: 8,
+  },
 };
 
 const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({
@@ -247,43 +278,53 @@ const Toggle: React.FC<{ value: boolean; onChange: (v: boolean) => void }> = ({
   </div>
 );
 
-export const Settings: React.FC<SettingsProps> = ({
-  agents: initialAgents = [],
-  redactionPatterns: initialPatterns = [],
-  onSave,
-  onReset,
-}) => {
+export const Settings: React.FC = () => {
   const [activeSection, setActiveSection] = useState<SettingsSection>('model');
-  const { currentModel, setModel, focusMode, toggleFocusMode } = useAppStore();
+  const { currentModel, setModel, focusMode, toggleFocusMode, setSidebarPanel } = useAppStore();
+  const runtimeConnected = useRuntimeStore((s) => s.connected);
+  const runtimeError = useRuntimeStore((s) => s.error);
+  const integrations = useRuntimeStore((s) => s.integrations);
 
   // Local state for settings
   const [defaultModel, setDefaultModel] = useState(currentModel);
   const [apiKey, setApiKey] = useState('');
-  const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>(initialAgents);
+  const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([]);
   const [agentDir, setAgentDir] = useState('~/.aahi/agents');
-  const [patterns, setPatterns] = useState<RedactionPattern[]>(initialPatterns);
+  const [patterns, setPatterns] = useState<RedactionPattern[]>([]);
   const [newPattern, setNewPattern] = useState('');
   const [telemetry, setTelemetry] = useState(false);
   const [dataResidency, setDataResidency] = useState('us-east');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  const handleSave = () => {
-    setModel(defaultModel);
-    onSave?.({
-      defaultModel,
-      apiKey,
-      agentConfigs,
-      agentDir,
-      patterns,
-      focusMode,
-      telemetry,
-      dataResidency,
-    });
+  // Sync model from app store
+  useEffect(() => {
+    setDefaultModel(currentModel);
+  }, [currentModel]);
+
+  const handleSave = async () => {
+    setSaveStatus('saving');
+    try {
+      // Save model selection
+      setModel(defaultModel);
+
+      // Save API key to secure storage via Tauri
+      if (apiKey && isTauri()) {
+        await tauri.setSecret(`api-key-${defaultModel}`, apiKey);
+      }
+
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
   };
 
   const handleReset = () => {
     setDefaultModel(currentModel);
     setApiKey('');
-    onReset?.();
+    setSaveStatus('idle');
   };
 
   const toggleAgent = (name: string) => {
@@ -311,12 +352,35 @@ export const Settings: React.FC<SettingsProps> = ({
     setPatterns((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const connectedIntegrationCount = (integrations || []).filter(
+    (i) => i.connected
+  ).length;
+
   const renderSection = () => {
     switch (activeSection) {
       case 'model':
         return (
           <>
             <div style={styles.sectionTitle}>Model Configuration</div>
+
+            {/* Connection Status */}
+            <div style={styles.connectionStatus}>
+              <div
+                style={{
+                  ...styles.statusDot,
+                  backgroundColor: runtimeConnected ? '#4ec9b0' : '#f44747',
+                }}
+              />
+              <span style={styles.statusText}>
+                Runtime: {runtimeConnected ? 'Connected' : 'Disconnected'}
+              </span>
+              {runtimeError && (
+                <span style={{ fontSize: 11, color: '#f44747', marginLeft: 8 }}>
+                  ({runtimeError})
+                </span>
+              )}
+            </div>
+
             <div style={styles.field}>
               <label style={styles.fieldLabel}>Default Model</label>
               <select
@@ -343,7 +407,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 onChange={(e) => setApiKey(e.target.value)}
               />
               <div style={styles.description}>
-                Your API key is stored locally and never sent to Aahi servers.
+                {isTauri()
+                  ? 'Your API key is stored securely in the system keychain.'
+                  : 'Your API key is stored locally and never sent to Aahi servers.'}
               </div>
             </div>
           </>
@@ -353,10 +419,48 @@ export const Settings: React.FC<SettingsProps> = ({
         return (
           <>
             <div style={styles.sectionTitle}>Integrations</div>
-            <div style={{ fontSize: 13, color: '#858585', lineHeight: '1.6' }}>
-              Manage integrations from the Integration Hub panel. This section shows your
-              integration connection status and credentials.
+
+            <div style={styles.connectionStatus}>
+              <div
+                style={{
+                  ...styles.statusDot,
+                  backgroundColor: connectedIntegrationCount > 0 ? '#4ec9b0' : '#858585',
+                }}
+              />
+              <span style={styles.statusText}>
+                {connectedIntegrationCount} integration{connectedIntegrationCount !== 1 ? 's' : ''} connected
+              </span>
             </div>
+
+            <div style={{ fontSize: 13, color: '#858585', lineHeight: '1.6', marginBottom: 12 }}>
+              Manage integrations from the Integration Hub panel. Connected integrations
+              provide live data for timeline events, proactive alerts, and agent context.
+            </div>
+
+            {(integrations || [])
+              .filter((i) => i.connected)
+              .map((integ) => (
+                <div
+                  key={integ.id}
+                  style={{
+                    ...styles.toggle,
+                    borderLeftColor: '#4ec9b0',
+                    borderLeft: '3px solid #4ec9b0',
+                  }}
+                >
+                  <span style={styles.toggleLabel}>
+                    {'\u2699'} {integ.name}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#4ec9b0' }}>Connected</span>
+                </div>
+              ))}
+
+            <button
+              style={styles.integrationLink}
+              onClick={() => setSidebarPanel('integrations')}
+            >
+              Open Integration Hub
+            </button>
           </>
         );
 
@@ -378,7 +482,9 @@ export const Settings: React.FC<SettingsProps> = ({
             <div style={styles.field}>
               <label style={styles.fieldLabel}>Enable/Disable Agents</label>
               {agentConfigs.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#858585' }}>No agents configured</div>
+                <div style={{ fontSize: 12, color: '#858585' }}>
+                  No agents configured. Agents will appear here once the runtime provides them.
+                </div>
               ) : (
                 agentConfigs.map((agent) => (
                   <div key={agent.name} style={styles.toggle}>
@@ -509,11 +615,24 @@ export const Settings: React.FC<SettingsProps> = ({
       </div>
 
       <div style={styles.footer}>
+        {saveStatus === 'saved' && (
+          <span style={{ ...styles.saveStatus, color: '#4ec9b0' }}>Settings saved</span>
+        )}
+        {saveStatus === 'error' && (
+          <span style={{ ...styles.saveStatus, color: '#f44747' }}>Failed to save</span>
+        )}
         <button style={styles.resetBtn} onClick={handleReset}>
           Reset
         </button>
-        <button style={styles.saveBtn} onClick={handleSave}>
-          Save
+        <button
+          style={{
+            ...styles.saveBtn,
+            opacity: saveStatus === 'saving' ? 0.6 : 1,
+          }}
+          onClick={handleSave}
+          disabled={saveStatus === 'saving'}
+        >
+          {saveStatus === 'saving' ? 'Saving...' : 'Save'}
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore, SidebarPanel } from '../store/app-store';
+import { FileExplorer } from '../editor/FileExplorer';
 
 const sidebarTabs: { id: SidebarPanel; icon: string; label: string }[] = [
   { id: 'explorer', icon: '📁', label: 'Explorer' },
@@ -106,20 +107,7 @@ const styles = {
   },
 };
 
-const ExplorerPanel: React.FC = () => (
-  <>
-    <div style={styles.panelHeader}>Explorer</div>
-    <div style={styles.panelContent}>
-      <div style={styles.folderItem}>▸ src/</div>
-      <div style={{ ...styles.fileItem, paddingLeft: 20 }}>main.tsx</div>
-      <div style={{ ...styles.fileItem, paddingLeft: 20 }}>App.tsx</div>
-      <div style={styles.folderItem}>▸ runtime/</div>
-      <div style={styles.folderItem}>▸ tests/</div>
-      <div style={styles.fileItem}>package.json</div>
-      <div style={styles.fileItem}>tsconfig.json</div>
-    </div>
-  </>
-);
+const ExplorerPanel: React.FC = () => <FileExplorer />;
 
 const IntegrationsPanel: React.FC = () => (
   <>

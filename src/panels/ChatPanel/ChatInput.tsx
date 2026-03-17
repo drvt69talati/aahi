@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAppStore } from '../../store/app-store';
+import { useRuntimeStore } from '../../store/runtime-store';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -73,6 +74,10 @@ const styles = {
     fontSize: 11,
     color: '#585858',
   },
+  streamingHint: {
+    fontSize: 11,
+    color: '#cca700',
+  },
   autocomplete: {
     position: 'absolute' as const,
     bottom: '100%',
@@ -106,9 +111,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
   const [value, setValue] = useState('');
   const [showSlash, setShowSlash] = useState(false);
   const [showMentions, setShowMentions] = useState(false);
+  const [showFileList, setShowFileList] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const currentModel = useAppStore((s) => s.currentModel);
+  const chatStreaming = useRuntimeStore((s) => s.chatStreaming);
+
+  // File tree for @file: autocomplete — flatten tree entries for search
+  const fileTree = useRuntimeStore((s) => s.fileTree) as Array<{ path: string; name: string; isDir?: boolean }> | undefined;
 
   // Filter autocomplete items
   const slashFiltered = SLASH_COMMANDS.filter((c) =>
@@ -121,7 +131,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
     return m.name.toLowerCase().startsWith(query);
   });
 
-  const activeItems = showSlash ? slashFiltered : showMentions ? mentionFiltered : [];
+  // File list filtering for @file:
+  const fileFiltered = (fileTree || []).filter((f) => {
+    const lastAt = value.lastIndexOf('@file:');
+    if (lastAt === -1) return true;
+    const query = value.slice(lastAt + 6).toLowerCase();
+    return f.path.toLowerCase().includes(query) || f.name.toLowerCase().includes(query);
+  }).slice(0, 15);
+
+  const activeItems = showSlash
+    ? slashFiltered
+    : showFileList
+      ? fileFiltered.map((f) => ({ name: `@file:${f.path}`, description: f.name }))
+      : showMentions
+        ? mentionFiltered
+        : [];
 
   // Auto-resize textarea
   useEffect(() => {
@@ -135,6 +159,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     setValue(v);
+
+    // Detect @file: for file autocomplete
+    if (v.includes('@file:')) {
+      setShowFileList(true);
+      setShowSlash(false);
+      setShowMentions(false);
+      setSelectedIndex(0);
+      return;
+    } else {
+      setShowFileList(false);
+    }
 
     // Detect slash commands at the beginning
     if (v.startsWith('/')) {
@@ -161,6 +196,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
       if (showSlash) {
         setValue(text + ' ');
         setShowSlash(false);
+      } else if (showFileList) {
+        const lastAt = value.lastIndexOf('@file:');
+        const before = value.slice(0, lastAt);
+        setValue(before + text + ' ');
+        setShowFileList(false);
       } else if (showMentions) {
         const lastAt = value.lastIndexOf('@');
         const before = value.slice(0, lastAt);
@@ -169,13 +209,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
       }
       textareaRef.current?.focus();
     },
-    [showSlash, showMentions, value]
+    [showSlash, showMentions, showFileList, value]
   );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       // Autocomplete navigation
-      if (activeItems.length > 0 && (showSlash || showMentions)) {
+      if (activeItems.length > 0 && (showSlash || showMentions || showFileList)) {
         if (e.key === 'ArrowUp') {
           e.preventDefault();
           setSelectedIndex((i) => (i > 0 ? i - 1 : activeItems.length - 1));
@@ -198,6 +238,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
           e.preventDefault();
           setShowSlash(false);
           setShowMentions(false);
+          setShowFileList(false);
           return;
         }
       }
@@ -210,16 +251,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
           setValue('');
           setShowSlash(false);
           setShowMentions(false);
+          setShowFileList(false);
         }
       }
     },
-    [value, disabled, onSend, activeItems, selectedIndex, showSlash, showMentions, insertAutocomplete]
+    [value, disabled, onSend, activeItems, selectedIndex, showSlash, showMentions, showFileList, insertAutocomplete]
   );
+
+  const isDisabled = disabled || chatStreaming;
 
   return (
     <div style={styles.container}>
       {/* Autocomplete dropdown */}
-      {activeItems.length > 0 && (showSlash || showMentions) && (
+      {activeItems.length > 0 && (showSlash || showMentions || showFileList) && (
         <div style={styles.autocomplete}>
           {activeItems.map((item, i) => {
             const label = 'command' in item ? item.command : item.name;
@@ -244,17 +288,28 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled = false }
       <div style={styles.inputWrapper}>
         <textarea
           ref={textareaRef}
-          style={styles.textarea}
-          placeholder="Ask Aahi anything... (@ to mention, / for commands)"
+          style={{
+            ...styles.textarea,
+            opacity: isDisabled ? 0.6 : 1,
+          }}
+          placeholder={
+            isDisabled
+              ? 'Waiting for response...'
+              : 'Ask Aahi anything... (@ to mention, / for commands)'
+          }
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          disabled={disabled}
+          disabled={isDisabled}
           rows={1}
         />
         <div style={styles.footer}>
           <span style={styles.modelBadge}>{currentModel}</span>
-          <span style={styles.hint}>Enter to send, Shift+Enter for newline</span>
+          {chatStreaming ? (
+            <span style={styles.streamingHint}>Streaming...</span>
+          ) : (
+            <span style={styles.hint}>Enter to send, Shift+Enter for newline</span>
+          )}
         </div>
       </div>
     </div>

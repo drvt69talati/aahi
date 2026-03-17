@@ -1,62 +1,14 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useAppStore } from './store/app-store';
+import { useRuntimeStore } from './store/runtime-store';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { BottomPanel } from './components/BottomPanel';
 import { MonacoCore } from './editor/MonacoCore';
+import { TabBar } from './editor/TabBar';
+import { CommandPalette } from './editor/CommandPalette';
 import { InlinePromptBar, useInlinePrompt } from './editor/InlinePromptBar';
 import { ChatPanel } from './panels/ChatPanel/ChatPanel';
-import type { editor } from 'monaco-editor';
-
-const SAMPLE_CODE = `// Welcome to Aahi — AI-native Software Operations Platform
-// The IDE that sees your living system.
-//
-// Key shortcuts:
-//   Cmd+K — Inline AI prompt
-//   Cmd+L — Focus AI chat
-//   Cmd+B — Toggle sidebar
-//   Cmd+J — Toggle bottom panel
-
-import { TimelineStore } from './runtime/intelligence/timeline';
-import { AgentRuntime } from './runtime/agents/runtime';
-import { IntegrationRegistry } from './runtime/integrations/registry';
-
-async function main() {
-  // Initialize the Aahi runtime
-  const timeline = new TimelineStore();
-  const agents = new AgentRuntime();
-  const integrations = new IntegrationRegistry();
-
-  // Register built-in integrations
-  await integrations.register('github', {
-    type: 'devops',
-    capabilities: ['pr', 'issues', 'actions'],
-  });
-
-  await integrations.register('kubernetes', {
-    type: 'infrastructure',
-    capabilities: ['pods', 'deployments', 'logs'],
-  });
-
-  // Start the proactive monitoring agent
-  agents.spawn('proactive', {
-    interval: 30_000,
-    sources: ['github', 'kubernetes', 'datadog'],
-    onInsight: (insight) => {
-      timeline.addEvent({
-        type: 'proactive',
-        source: insight.source,
-        summary: insight.message,
-        severity: insight.severity,
-      });
-    },
-  });
-
-  console.log('Aahi runtime initialized');
-}
-
-main().catch(console.error);
-`;
 
 const styles = {
   root: {
@@ -94,31 +46,21 @@ const styles = {
     height: 200,
     minHeight: 100,
   },
-  editorTabs: {
+  connectionIndicator: {
+    position: 'fixed' as const,
+    bottom: 4,
+    left: 8,
     display: 'flex',
     alignItems: 'center',
-    height: 35,
-    backgroundColor: '#252526',
-    borderBottom: '1px solid #3e3e42',
-    paddingLeft: 4,
-  },
-  editorTab: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '0 12px',
-    height: 35,
-    fontSize: 12,
-    color: '#cccccc',
-    backgroundColor: '#1e1e1e',
-    borderRight: '1px solid #3e3e42',
-    borderTop: '1px solid #007acc',
-    cursor: 'pointer',
-  },
-  editorTabInactive: {
-    backgroundColor: '#2d2d2d',
-    borderTop: '1px solid transparent',
+    gap: 4,
+    fontSize: 10,
     color: '#858585',
+    zIndex: 50,
+  },
+  connectionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
   },
 };
 
@@ -132,26 +74,48 @@ export const App: React.FC = () => {
     toggleBottomPanel,
   } = useAppStore();
 
-  const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
+  const initialize = useRuntimeStore((s) => s.initialize);
+  const connected = useRuntimeStore((s) => s.connected);
+
   const inlinePrompt = useInlinePrompt();
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
-  const handleEditorMount = useCallback((editor: editor.IStandaloneCodeEditor) => {
-    setEditorInstance(editor);
-  }, []);
+  /* ── Initialize runtime on mount ── */
+  useEffect(() => {
+    initialize?.();
+  }, [initialize]);
 
-  // Global keyboard shortcuts
-  React.useEffect(() => {
+  /* ── Global keyboard shortcuts ── */
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+
+      // Cmd+B — toggle sidebar
       if (mod && e.key === 'b') {
         e.preventDefault();
         toggleLeftSidebar();
       }
+
+      // Cmd+J — toggle bottom panel
       if (mod && e.key === 'j') {
         e.preventDefault();
         toggleBottomPanel();
       }
+
+      // Cmd+Shift+L — toggle chat panel
       if (mod && e.shiftKey && e.key === 'l') {
+        e.preventDefault();
+        toggleRightPanel();
+      }
+
+      // Cmd+Shift+P — command palette
+      if (mod && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+
+      // Cmd+Shift+I — toggle Composer / right panel
+      if (mod && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
         toggleRightPanel();
       }
@@ -168,29 +132,14 @@ export const App: React.FC = () => {
         {/* Left Sidebar */}
         <Sidebar />
 
-        {/* Center: Editor + Bottom Panel */}
+        {/* Center: TabBar + Editor + Bottom Panel */}
         <div style={styles.center}>
-          {/* Editor Tab Bar */}
-          <div style={styles.editorTabs}>
-            <div style={styles.editorTab}>
-              <span style={{ fontSize: 11 }}>TS</span>
-              main.ts
-              <span style={{ color: '#858585', fontSize: 11, cursor: 'pointer' }}>x</span>
-            </div>
-            <div style={{ ...styles.editorTab, ...styles.editorTabInactive }}>
-              <span style={{ fontSize: 11 }}>TS</span>
-              App.tsx
-              <span style={{ color: '#585858', fontSize: 11, cursor: 'pointer' }}>x</span>
-            </div>
-          </div>
+          {/* Tab Bar */}
+          <TabBar />
 
           {/* Monaco Editor */}
           <div style={styles.editorArea}>
-            <MonacoCore
-              content={SAMPLE_CODE}
-              language="typescript"
-              onEditorMount={handleEditorMount}
-            />
+            <MonacoCore />
 
             {/* Inline Prompt Bar (Cmd+K) */}
             {inlinePrompt.isOpen && (
@@ -219,6 +168,23 @@ export const App: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Connection Status Indicator */}
+      <div style={styles.connectionIndicator}>
+        <div
+          style={{
+            ...styles.connectionDot,
+            backgroundColor: connected ? '#4ec9b0' : '#f44747',
+          }}
+        />
+        <span>{connected ? 'Connected' : 'Disconnected'}</span>
+      </div>
+
+      {/* Command Palette */}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
     </div>
   );
 };

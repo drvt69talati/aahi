@@ -1,30 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useRuntimeStore } from '../../store/runtime-store';
 
 type EventSource = 'commit' | 'deploy' | 'alert' | 'incident' | 'flag-change' | 'ai-annotation';
 type EventSeverity = 'info' | 'warning' | 'error' | 'critical';
 
-interface TimelineEvent {
-  id: string;
-  timestamp: number;
-  title: string;
-  source: EventSource;
-  severity: EventSeverity;
-  description?: string;
-  isCorrelation?: boolean;
-  metadata?: Record<string, string>;
-}
-
-interface TimelinePanelProps {
-  events: TimelineEvent[];
-}
-
 const sourceIcons: Record<EventSource, string> = {
-  commit: '\u25CF', // filled circle
-  deploy: '\u25B6', // play triangle
-  alert: '\u25B2', // triangle
-  incident: '\u26A0', // warning
-  'flag-change': '\u2691', // flag
-  'ai-annotation': '\u2605', // star
+  commit: '\u25CF',
+  deploy: '\u25B6',
+  alert: '\u25B2',
+  incident: '\u26A0',
+  'flag-change': '\u2691',
+  'ai-annotation': '\u2605',
 };
 
 const sourceColors: Record<EventSource, string> = {
@@ -44,6 +30,8 @@ const severityColors: Record<EventSeverity, string> = {
 };
 
 const allSources: EventSource[] = ['commit', 'deploy', 'alert', 'incident', 'flag-change', 'ai-annotation'];
+
+const REFRESH_INTERVAL_MS = 30_000;
 
 const styles = {
   container: {
@@ -210,15 +198,19 @@ const styles = {
   },
   emptyState: {
     display: 'flex',
+    flexDirection: 'column' as const,
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
     color: '#858585',
     fontSize: 13,
+    gap: 8,
+    textAlign: 'center' as const,
+    padding: 24,
   },
 };
 
-function formatTimestamp(ts: number): string {
+function formatTimestamp(ts: string | number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString('en-US', {
     hour12: false,
@@ -228,9 +220,42 @@ function formatTimestamp(ts: number): string {
   });
 }
 
-export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
+function toNumericTimestamp(ts: string | number): number {
+  return typeof ts === 'number' ? ts : new Date(ts).getTime();
+}
+
+export const TimelinePanel: React.FC = () => {
+  const timelineEvents = useRuntimeStore((s) => s.timelineEvents);
+  const loadTimeline = useRuntimeStore((s) => s.loadTimeline);
+  const connected = useRuntimeStore((s) => s.connected);
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeSources, setActiveSources] = useState<Set<EventSource>>(new Set(allSources));
+  const [loading, setLoading] = useState(false);
+  const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const doLoad = useCallback(
+    (sources?: EventSource[]) => {
+      if (!connected) return;
+      setLoading(true);
+      const query = sources ? { sources } : undefined;
+      loadTimeline(query).finally(() => setLoading(false));
+    },
+    [connected, loadTimeline]
+  );
+
+  // Load on mount
+  useEffect(() => {
+    doLoad();
+  }, [doLoad]);
+
+  // Auto-refresh every 30s
+  useEffect(() => {
+    refreshRef.current = setInterval(() => doLoad(), REFRESH_INTERVAL_MS);
+    return () => {
+      if (refreshRef.current) clearInterval(refreshRef.current);
+    };
+  }, [doLoad]);
 
   const toggleSource = (source: EventSource) => {
     setActiveSources((prev) => {
@@ -244,15 +269,18 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
     });
   };
 
+  const events = timelineEvents || [];
   const filtered = events
-    .filter((e) => activeSources.has(e.source))
-    .sort((a, b) => b.timestamp - a.timestamp);
+    .filter((e) => activeSources.has(e.source as EventSource))
+    .sort((a, b) => toNumericTimestamp(b.timestamp) - toNumericTimestamp(a.timestamp));
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <span style={styles.headerTitle}>Event Timeline</span>
-        <span style={{ fontSize: 11, color: '#858585' }}>{filtered.length} events</span>
+        <span style={{ fontSize: 11, color: '#858585' }}>
+          {loading ? 'Loading...' : `${filtered.length} events`}
+        </span>
       </div>
 
       <div style={styles.filterBar}>
@@ -263,7 +291,12 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
             style={{
               ...styles.filterChip,
               ...(activeSources.has(source)
-                ? { ...styles.filterChipActive, borderColor: sourceColors[source], color: sourceColors[source], backgroundColor: sourceColors[source] + '22' }
+                ? {
+                    ...styles.filterChipActive,
+                    borderColor: sourceColors[source],
+                    color: sourceColors[source],
+                    backgroundColor: sourceColors[source] + '22',
+                  }
                 : {}),
             }}
             onClick={() => toggleSource(source)}
@@ -274,7 +307,13 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
       </div>
 
       {filtered.length === 0 ? (
-        <div style={styles.emptyState}>No events to display</div>
+        <div style={styles.emptyState}>
+          <span style={{ fontSize: 20, color: '#4ec9b0' }}>{'\u231A'}</span>
+          <span>No events yet</span>
+          <span style={{ fontSize: 11 }}>
+            Connect integrations to see live data
+          </span>
+        </div>
       ) : (
         <div style={styles.timeline}>
           <div style={styles.timelineLine} />
@@ -287,31 +326,38 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
               <div
                 style={{
                   ...styles.eventDot,
-                  backgroundColor: sourceColors[event.source],
+                  backgroundColor: sourceColors[event.source as EventSource] || '#858585',
                   color: '#1e1e1e',
                 }}
               >
-                {sourceIcons[event.source]}
+                {sourceIcons[event.source as EventSource] || '\u2022'}
               </div>
               <div
                 style={{
                   ...styles.eventCard,
-                  ...(event.isCorrelation ? styles.eventCardCorrelation : {}),
+                  ...((event as Record<string, unknown>).isCorrelation ? styles.eventCardCorrelation : {}),
                 }}
               >
                 <div style={styles.eventTop}>
-                  <span style={{ ...styles.eventIcon, color: sourceColors[event.source] }}>
-                    {sourceIcons[event.source]}
+                  <span
+                    style={{
+                      ...styles.eventIcon,
+                      color: sourceColors[event.source as EventSource] || '#858585',
+                    }}
+                  >
+                    {sourceIcons[event.source as EventSource] || '\u2022'}
                   </span>
                   <span style={styles.eventTitle}>{event.title}</span>
-                  <span style={styles.eventTimestamp}>{formatTimestamp(event.timestamp)}</span>
+                  <span style={styles.eventTimestamp}>
+                    {formatTimestamp(event.timestamp)}
+                  </span>
                 </div>
                 <div style={styles.eventMeta}>
                   <span
                     style={{
                       ...styles.sourceBadge,
-                      backgroundColor: sourceColors[event.source] + '22',
-                      color: sourceColors[event.source],
+                      backgroundColor: (sourceColors[event.source as EventSource] || '#858585') + '22',
+                      color: sourceColors[event.source as EventSource] || '#858585',
                     }}
                   >
                     {event.source}
@@ -319,10 +365,10 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
                   <div
                     style={{
                       ...styles.severityDot,
-                      backgroundColor: severityColors[event.severity],
+                      backgroundColor: severityColors[event.severity as EventSeverity] || '#858585',
                     }}
                   />
-                  {event.isCorrelation && (
+                  {(event as Record<string, unknown>).isCorrelation && (
                     <span style={styles.correlationBadge}>AI Correlation</span>
                   )}
                 </div>
@@ -332,8 +378,14 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ events }) => {
                     {event.description && (
                       <div style={{ marginBottom: 6 }}>{event.description}</div>
                     )}
-                    {event.metadata &&
-                      Object.entries(event.metadata).map(([key, value]) => (
+                    {event.service && (
+                      <div style={styles.metadataRow}>
+                        <span style={styles.metadataKey}>service:</span>
+                        <span style={styles.metadataValue}>{event.service}</span>
+                      </div>
+                    )}
+                    {(event as Record<string, unknown>).metadata &&
+                      Object.entries((event as Record<string, unknown>).metadata as Record<string, string>).map(([key, value]) => (
                         <div key={key} style={styles.metadataRow}>
                           <span style={styles.metadataKey}>{key}:</span>
                           <span style={styles.metadataValue}>{value}</span>

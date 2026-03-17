@@ -1,23 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useRuntimeStore } from '../../store/runtime-store';
 
 type ActionStatus = 'running' | 'completed' | 'failed';
-
-interface AgentAction {
-  id: string;
-  timestamp: number;
-  agentName: string;
-  action: string;
-  status: ActionStatus;
-  duration?: number; // ms
-  params?: Record<string, unknown>;
-  result?: string;
-  error?: string;
-}
-
-interface AgentActivityLogProps {
-  actions: AgentAction[];
-  agents: string[];
-}
 
 const statusColors: Record<ActionStatus, string> = {
   running: '#cca700',
@@ -26,9 +10,9 @@ const statusColors: Record<ActionStatus, string> = {
 };
 
 const statusIcons: Record<ActionStatus, string> = {
-  running: '\u25CB', // circle
-  completed: '\u2713', // checkmark
-  failed: '\u2717', // x mark
+  running: '\u25CB',
+  completed: '\u2713',
+  failed: '\u2717',
 };
 
 const styles = {
@@ -156,11 +140,24 @@ const styles = {
   },
   emptyState: {
     display: 'flex',
+    flexDirection: 'column' as const,
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
     color: '#858585',
     fontSize: 13,
+    gap: 8,
+  },
+  stepList: {
+    marginTop: 6,
+    marginLeft: 24,
+  },
+  stepItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '3px 0',
+    fontSize: 11,
   },
 };
 
@@ -174,7 +171,9 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export const AgentActivityLog: React.FC<AgentActivityLogProps> = ({ actions, agents }) => {
+export const AgentActivityLog: React.FC = () => {
+  const agentExecutions = useRuntimeStore((s) => s.agentExecutions);
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterAgent, setFilterAgent] = useState<string>('all');
   const listRef = useRef<HTMLDivElement>(null);
@@ -199,17 +198,26 @@ export const AgentActivityLog: React.FC<AgentActivityLogProps> = ({ actions, age
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [actions]);
+  }, [agentExecutions]);
+
+  const executions = agentExecutions || [];
+
+  // Derive unique agent names
+  const agents = Array.from(new Set(executions.map((e) => e.agentId)));
 
   const filtered =
-    filterAgent === 'all' ? actions : actions.filter((a) => a.agentName === filterAgent);
+    filterAgent === 'all'
+      ? executions
+      : executions.filter((e) => e.agentId === filterAgent);
+
+  const runningCount = executions.filter((e) => e.status === 'running').length;
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <span style={styles.headerTitle}>Agent Activity Log</span>
         <span style={{ fontSize: 11, color: '#858585' }}>
-          {actions.filter((a) => a.status === 'running').length} running
+          {runningCount} running
         </span>
       </div>
 
@@ -230,67 +238,109 @@ export const AgentActivityLog: React.FC<AgentActivityLogProps> = ({ actions, age
       </div>
 
       {filtered.length === 0 ? (
-        <div style={styles.emptyState}>No agent activity recorded</div>
+        <div style={styles.emptyState}>
+          <span style={{ fontSize: 20, color: '#569cd6' }}>{'\u2699'}</span>
+          <span>No agent activity recorded</span>
+        </div>
       ) : (
         <div ref={listRef} style={styles.list}>
-          {filtered.map((entry) => (
-            <div
-              key={entry.id}
-              style={{
-                ...styles.entry,
-                backgroundColor: expandedId === entry.id ? '#2d2d2d' : 'transparent',
-              }}
-              onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-            >
-              <div style={styles.entryTop}>
-                {entry.status === 'running' ? (
-                  <div style={styles.spinner} />
-                ) : (
-                  <span
-                    style={{
-                      ...styles.statusIcon,
-                      color: statusColors[entry.status],
-                    }}
-                  >
-                    {statusIcons[entry.status]}
-                  </span>
-                )}
-                <span style={styles.timestamp}>{formatTime(entry.timestamp)}</span>
-                <span style={styles.agentBadge}>{entry.agentName}</span>
-                <span style={styles.actionText}>{entry.action}</span>
-                {entry.duration != null && (
-                  <span style={styles.duration}>{formatDuration(entry.duration)}</span>
-                )}
-              </div>
+          {filtered.map((exec) => {
+            // Compute duration from steps if available
+            const totalDuration = exec.steps?.reduce(
+              (sum, s) => sum + (s.durationMs || 0),
+              0
+            );
+            const lastStep = exec.steps?.[exec.steps.length - 1];
+            const execError = exec.steps?.find((s) => s.error)?.error;
 
-              {expandedId === entry.id && (
-                <div style={styles.expandedContent}>
-                  {entry.params && (
-                    <div style={styles.expandedSection}>
-                      <div style={styles.expandedLabel}>Parameters</div>
-                      <div style={styles.expandedValue}>
-                        {JSON.stringify(entry.params, null, 2)}
-                      </div>
-                    </div>
+            return (
+              <div
+                key={exec.planId}
+                style={{
+                  ...styles.entry,
+                  backgroundColor: expandedId === exec.planId ? '#2d2d2d' : 'transparent',
+                }}
+                onClick={() => setExpandedId(expandedId === exec.planId ? null : exec.planId)}
+              >
+                <div style={styles.entryTop}>
+                  {exec.status === 'running' ? (
+                    <div style={styles.spinner} />
+                  ) : (
+                    <span
+                      style={{
+                        ...styles.statusIcon,
+                        color: statusColors[exec.status as ActionStatus] || '#858585',
+                      }}
+                    >
+                      {statusIcons[exec.status as ActionStatus] || '\u2022'}
+                    </span>
                   )}
-                  {entry.result && (
-                    <div style={styles.expandedSection}>
-                      <div style={styles.expandedLabel}>Result</div>
-                      <div style={styles.expandedValue}>{entry.result}</div>
-                    </div>
-                  )}
-                  {entry.error && (
-                    <div style={styles.expandedSection}>
-                      <div style={{ ...styles.expandedLabel, color: '#f44747' }}>Error</div>
-                      <div style={{ ...styles.expandedValue, color: '#f44747' }}>
-                        {entry.error}
-                      </div>
-                    </div>
+                  <span style={styles.agentBadge}>{exec.agentId}</span>
+                  <span style={styles.actionText}>{exec.intent || 'Execution'}</span>
+                  {totalDuration != null && totalDuration > 0 && (
+                    <span style={styles.duration}>{formatDuration(totalDuration)}</span>
                   )}
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Step progress */}
+                {exec.steps && exec.steps.length > 0 && (
+                  <div style={styles.stepList}>
+                    {exec.steps.map((step, idx) => (
+                      <div key={step.id || idx} style={styles.stepItem}>
+                        {step.status === 'running' ? (
+                          <div style={{ ...styles.spinner, width: 8, height: 8 }} />
+                        ) : (
+                          <span
+                            style={{
+                              ...styles.statusIcon,
+                              fontSize: 10,
+                              width: 12,
+                              color: statusColors[step.status as ActionStatus] || '#858585',
+                            }}
+                          >
+                            {statusIcons[step.status as ActionStatus] || '\u2022'}
+                          </span>
+                        )}
+                        <span style={{ color: '#cccccc' }}>{step.name}</span>
+                        {step.durationMs != null && (
+                          <span style={styles.duration}>{formatDuration(step.durationMs)}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Expanded details */}
+                {expandedId === exec.planId && (
+                  <div style={styles.expandedContent}>
+                    {lastStep?.result && (
+                      <div style={styles.expandedSection}>
+                        <div style={styles.expandedLabel}>Result</div>
+                        <div style={styles.expandedValue}>
+                          {typeof lastStep.result === 'string'
+                            ? lastStep.result
+                            : JSON.stringify(lastStep.result, null, 2)}
+                        </div>
+                      </div>
+                    )}
+                    {execError && (
+                      <div style={styles.expandedSection}>
+                        <div style={{ ...styles.expandedLabel, color: '#f44747' }}>Error</div>
+                        <div style={{ ...styles.expandedValue, color: '#f44747' }}>
+                          {execError}
+                        </div>
+                      </div>
+                    )}
+                    {!lastStep?.result && !execError && (
+                      <div style={{ fontSize: 11, color: '#858585' }}>
+                        {exec.status === 'running' ? 'Execution in progress...' : 'No details available'}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

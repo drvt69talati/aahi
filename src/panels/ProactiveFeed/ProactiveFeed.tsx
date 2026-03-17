@@ -1,22 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useAppStore } from '../../store/app-store';
+import { useRuntimeStore } from '../../store/runtime-store';
 
 type AlertSeverity = 'critical' | 'warning' | 'info';
-
-interface ProactiveAlert {
-  id: string;
-  severity: AlertSeverity;
-  title: string;
-  description: string;
-  suggestedAction: string;
-  timestamp: number;
-}
-
-interface ProactiveFeedProps {
-  alerts: ProactiveAlert[];
-  onDismiss: (alertId: string) => void;
-  onActionClick: (alertId: string) => void;
-}
 
 const severityColors: Record<AlertSeverity, string> = {
   critical: '#d32f2f',
@@ -25,9 +11,9 @@ const severityColors: Record<AlertSeverity, string> = {
 };
 
 const severityIcons: Record<AlertSeverity, string> = {
-  critical: '\u26A0', // warning sign
-  warning: '\u25B2', // triangle
-  info: '\u24D8', // circled i
+  critical: '\u26A0',
+  warning: '\u25B2',
+  info: '\u24D8',
 };
 
 const severityLabels: Record<AlertSeverity, string> = {
@@ -162,8 +148,9 @@ const styles = {
   },
 };
 
-function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts;
+function formatRelativeTime(ts: string | number): string {
+  const tsNum = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  const diff = Date.now() - tsNum;
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
@@ -172,14 +159,14 @@ function formatRelativeTime(ts: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export const ProactiveFeed: React.FC<ProactiveFeedProps> = ({
-  alerts,
-  onDismiss,
-  onActionClick,
-}) => {
+export const ProactiveFeed: React.FC = () => {
   const focusMode = useAppStore((s) => s.focusMode);
+  const proactiveAlerts = useRuntimeStore((s) => s.proactiveAlerts);
+  const runAgent = useRuntimeStore((s) => s.runAgent);
+
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
+  const alerts = proactiveAlerts || [];
   const visibleAlerts = alerts.filter((a) => !dismissedIds.has(a.id));
   const suppressedCount = focusMode
     ? visibleAlerts.filter((a) => a.severity !== 'critical').length
@@ -191,21 +178,34 @@ export const ProactiveFeed: React.FC<ProactiveFeedProps> = ({
   // Group by severity
   const grouped = displayAlerts.reduce(
     (acc, alert) => {
-      acc[alert.severity] = acc[alert.severity] || [];
-      acc[alert.severity].push(alert);
+      const sev = alert.severity as AlertSeverity;
+      acc[sev] = acc[sev] || [];
+      acc[sev].push(alert);
       return acc;
     },
-    {} as Record<AlertSeverity, ProactiveAlert[]>
+    {} as Record<AlertSeverity, typeof displayAlerts>
   );
 
   const sortedSeverities = (Object.keys(grouped) as AlertSeverity[]).sort(
     (a, b) => severityOrder[a] - severityOrder[b]
   );
 
-  const handleDismiss = (id: string) => {
+  const handleDismiss = useCallback((id: string) => {
     setDismissedIds((prev) => new Set([...prev, id]));
-    onDismiss(id);
-  };
+  }, []);
+
+  const handleInvestigate = useCallback(
+    (alert: { id: string; suggestedAction?: string; title?: string }) => {
+      // Run the appropriate agent based on alert context
+      const agentId = alert.suggestedAction?.toLowerCase().includes('debug')
+        ? 'debug'
+        : alert.suggestedAction?.toLowerCase().includes('deploy')
+          ? 'deploy'
+          : 'investigate';
+      runAgent(agentId, alert.title || alert.id);
+    },
+    [runAgent]
+  );
 
   return (
     <div style={styles.container}>
@@ -243,17 +243,17 @@ export const ProactiveFeed: React.FC<ProactiveFeedProps> = ({
                   key={alert.id}
                   style={{
                     ...styles.alert,
-                    borderLeftColor: severityColors[alert.severity],
+                    borderLeftColor: severityColors[alert.severity as AlertSeverity] || '#858585',
                   }}
                 >
                   <div style={styles.alertHeader}>
                     <span
                       style={{
                         ...styles.alertIcon,
-                        color: severityColors[alert.severity],
+                        color: severityColors[alert.severity as AlertSeverity] || '#858585',
                       }}
                     >
-                      {severityIcons[alert.severity]}
+                      {severityIcons[alert.severity as AlertSeverity] || '\u2022'}
                     </span>
                     <span style={styles.alertTitle}>{alert.title}</span>
                     <span style={styles.alertTimestamp}>
@@ -264,9 +264,9 @@ export const ProactiveFeed: React.FC<ProactiveFeedProps> = ({
                   <div style={styles.alertActions}>
                     <button
                       style={styles.suggestedBtn}
-                      onClick={() => onActionClick(alert.id)}
+                      onClick={() => handleInvestigate(alert)}
                     >
-                      {alert.suggestedAction}
+                      {alert.suggestedAction || 'Investigate'}
                     </button>
                     <button
                       style={styles.dismissBtn}

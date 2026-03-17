@@ -1,13 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { ChatInput } from './ChatInput';
 import { useAppStore } from '../../store/app-store';
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
+import { useRuntimeStore } from '../../store/runtime-store';
+import { ApprovalGateCard } from '../../components/ApprovalGateCard';
 
 const styles = {
   container: {
@@ -30,12 +25,22 @@ const styles = {
     fontWeight: 600,
     color: '#cccccc',
   },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerModel: {
     fontSize: 11,
     color: '#858585',
     backgroundColor: '#2d2d2d',
     padding: '2px 6px',
     borderRadius: 3,
+  },
+  connectionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
   },
   messageList: {
     flex: 1,
@@ -106,6 +111,56 @@ const styles = {
     marginLeft: 2,
     verticalAlign: 'text-bottom',
     animation: 'aahi-blink 0.8s step-end infinite',
+  },
+  stepCard: {
+    margin: '6px 8px',
+    padding: '8px 12px',
+    backgroundColor: '#252526',
+    border: '1px solid #3e3e42',
+    borderRadius: 6,
+    fontSize: 12,
+  },
+  stepHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  stepAgent: {
+    fontSize: 10,
+    padding: '1px 6px',
+    borderRadius: 3,
+    backgroundColor: '#007acc22',
+    color: '#569cd6',
+    border: '1px solid #007acc44',
+  },
+  stepName: {
+    flex: 1,
+    color: '#cccccc',
+    fontWeight: 500 as const,
+  },
+  stepStatus: {
+    fontSize: 10,
+    fontWeight: 600 as const,
+  },
+  stepSpinner: {
+    display: 'inline-block',
+    width: 10,
+    height: 10,
+    border: '2px solid #cca70044',
+    borderTopColor: '#cca700',
+    borderRadius: '50%',
+    animation: 'aahi-spin 0.8s linear infinite',
+  },
+  errorBanner: {
+    padding: '6px 12px',
+    backgroundColor: '#f4474722',
+    borderBottom: '1px solid #f4474744',
+    fontSize: 12,
+    color: '#f44747',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
   },
 };
 
@@ -178,13 +233,27 @@ function renderMarkdown(text: string): React.ReactNode {
   return <>{parts}</>;
 }
 
+const statusColors: Record<string, string> = {
+  running: '#cca700',
+  completed: '#4ec9b0',
+  failed: '#f44747',
+};
+
 export const ChatPanel: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const currentModel = useAppStore((s) => s.currentModel);
 
-  // Inject blink animation
+  const chatMessages = useRuntimeStore((s) => s.chatMessages);
+  const chatStreaming = useRuntimeStore((s) => s.chatStreaming);
+  const sendChatMessage = useRuntimeStore((s) => s.sendChatMessage);
+  const runAgent = useRuntimeStore((s) => s.runAgent);
+  const agentExecutions = useRuntimeStore((s) => s.agentExecutions);
+  const pendingApprovals = useRuntimeStore((s) => s.pendingApprovals);
+  const respondToApproval = useRuntimeStore((s) => s.respondToApproval);
+  const connected = useRuntimeStore((s) => s.connected);
+  const error = useRuntimeStore((s) => s.error);
+
+  // Inject blink + spin animations
   useEffect(() => {
     const styleId = 'aahi-chat-style';
     if (!document.getElementById(styleId)) {
@@ -194,6 +263,9 @@ export const ChatPanel: React.FC = () => {
         @keyframes aahi-blink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }
+        }
+        @keyframes aahi-spin {
+          to { transform: rotate(360deg); }
         }
       `;
       document.head.appendChild(style);
@@ -214,70 +286,51 @@ export const ChatPanel: React.FC = () => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [messages]);
-
-  const simulateStreaming = useCallback(
-    (text: string) => {
-      const id = crypto.randomUUID();
-      setIsStreaming(true);
-
-      // Add empty assistant message
-      setMessages((prev) => [
-        ...prev,
-        { id, role: 'assistant', content: '', timestamp: Date.now() },
-      ]);
-
-      // Stream character by character
-      let charIndex = 0;
-      const interval = setInterval(() => {
-        charIndex++;
-        if (charIndex <= text.length) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id ? { ...m, content: text.slice(0, charIndex) } : m
-            )
-          );
-        } else {
-          clearInterval(interval);
-          setIsStreaming(false);
-        }
-      }, 15);
-    },
-    []
-  );
+  }, [chatMessages, agentExecutions, pendingApprovals]);
 
   const handleSend = useCallback(
     (text: string) => {
-      const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
+      // Detect /commands -> route to agent
+      if (text.startsWith('/')) {
+        const spaceIdx = text.indexOf(' ');
+        const command = spaceIdx > 0 ? text.slice(1, spaceIdx) : text.slice(1);
+        const intent = spaceIdx > 0 ? text.slice(spaceIdx + 1).trim() : '';
+        runAgent(command, intent);
+        return;
+      }
 
-      // Simulate an AI response
-      const responses: Record<string, string> = {
-        default: `I understand your request. As the Aahi AI assistant, I can help with code editing, debugging, deployments, and understanding your system's runtime behavior.\n\nHere's what I can do:\n- Analyze code with \`@file\` and \`@selection\` context\n- Debug issues using \`@logs\` and \`@traces\`\n- Monitor system health via \`@metrics\`\n- Execute operations through integrated tools\n\nWhat would you like to explore?`,
-      };
-
-      setTimeout(() => {
-        simulateStreaming(responses.default);
-      }, 300);
+      sendChatMessage(text);
     },
-    [simulateStreaming]
+    [sendChatMessage, runAgent]
   );
+
+  const lastMessage = chatMessages.length > 0 ? chatMessages[chatMessages.length - 1] : null;
 
   return (
     <div style={styles.container} data-chat-panel>
       <div style={styles.header}>
         <span style={styles.headerTitle}>AI Chat</span>
-        <span style={styles.headerModel}>{currentModel}</span>
+        <div style={styles.headerRight}>
+          <div
+            style={{
+              ...styles.connectionDot,
+              backgroundColor: connected ? '#4ec9b0' : '#f44747',
+            }}
+            title={connected ? 'Connected' : 'Disconnected'}
+          />
+          <span style={styles.headerModel}>{currentModel}</span>
+        </div>
       </div>
 
-      {messages.length === 0 ? (
+      {error && (
+        <div style={styles.errorBanner}>
+          <span>Error: {error}</span>
+        </div>
+      )}
+
+      {chatMessages.length === 0 && agentExecutions.length === 0 ? (
         <div style={styles.emptyState}>
-          <div style={styles.emptyIcon}>⬡</div>
+          <div style={styles.emptyIcon}>{'\u2B21'}</div>
           <div style={styles.emptyTitle}>Aahi AI Assistant</div>
           <div style={styles.emptyHint}>
             Ask questions, get code suggestions, debug issues, or manage deployments.
@@ -286,7 +339,7 @@ export const ChatPanel: React.FC = () => {
         </div>
       ) : (
         <div ref={listRef} style={styles.messageList}>
-          {messages.map((msg) => (
+          {chatMessages.map((msg) => (
             <div
               key={msg.id}
               style={{
@@ -303,15 +356,82 @@ export const ChatPanel: React.FC = () => {
                 {msg.role === 'user' ? 'You' : 'Aahi'}
               </div>
               {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
-              {msg.role === 'assistant' && isStreaming && msg === messages[messages.length - 1] && (
-                <span style={styles.streaming} />
-              )}
+              {msg.role === 'assistant' &&
+                chatStreaming &&
+                msg === lastMessage && <span style={styles.streaming} />}
+            </div>
+          ))}
+
+          {/* Inline agent execution progress */}
+          {agentExecutions.map((exec) => (
+            <div key={exec.planId} style={styles.stepCard}>
+              <div style={styles.stepHeader}>
+                <span style={styles.stepAgent}>{exec.agentId}</span>
+                <span style={styles.stepName}>{exec.intent || 'Running...'}</span>
+                <span
+                  style={{
+                    ...styles.stepStatus,
+                    color: statusColors[exec.status] || '#858585',
+                  }}
+                >
+                  {exec.status === 'running' ? (
+                    <div style={styles.stepSpinner} />
+                  ) : exec.status === 'completed' ? (
+                    '\u2713'
+                  ) : exec.status === 'failed' ? (
+                    '\u2717'
+                  ) : (
+                    exec.status
+                  )}
+                </span>
+              </div>
+              {exec.steps &&
+                exec.steps.map((step, idx) => (
+                  <div
+                    key={step.id || idx}
+                    style={{
+                      fontSize: 11,
+                      color: statusColors[step.status] || '#858585',
+                      paddingLeft: 8,
+                      marginTop: 2,
+                    }}
+                  >
+                    {step.status === 'running'
+                      ? '\u25CB'
+                      : step.status === 'completed'
+                        ? '\u2713'
+                        : step.status === 'failed'
+                          ? '\u2717'
+                          : '\u2022'}{' '}
+                    {step.name}
+                    {step.error && (
+                      <span style={{ color: '#f44747', marginLeft: 8 }}>{step.error}</span>
+                    )}
+                  </div>
+                ))}
+            </div>
+          ))}
+
+          {/* Inline approval gates */}
+          {pendingApprovals.map((gate) => (
+            <div key={gate.actionId} style={{ margin: '4px 8px' }}>
+              <ApprovalGateCard
+                gate={{
+                  requestId: gate.actionId,
+                  action: gate.actionType,
+                  integration: gate.integration,
+                  riskLevel: gate.riskLevel as 'low' | 'medium' | 'high' | 'critical',
+                  params: gate.params,
+                }}
+                onApprove={() => respondToApproval(gate.actionId, true)}
+                onDecline={() => respondToApproval(gate.actionId, false)}
+              />
             </div>
           ))}
         </div>
       )}
 
-      <ChatInput onSend={handleSend} disabled={isStreaming} />
+      <ChatInput onSend={handleSend} disabled={chatStreaming} />
     </div>
   );
 };
