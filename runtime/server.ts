@@ -13,6 +13,10 @@ import type { AahiConfig } from './aahi.js';
 import { LSPManager } from './integrations/lsp/lsp-manager.js';
 import { AahiLSPExtensions } from './integrations/lsp/aahi-lsp-extensions.js';
 import type { AahiLSPMethodName, AahiLSPRequest } from './integrations/lsp/aahi-lsp-extensions.js';
+import { PTYManager } from './terminal/pty-manager.js';
+import { ContextEngine } from './ai/context/context-engine.js';
+import type { ContextSource } from './ai/context/context-engine.js';
+import { WorkspaceConfigManager, type WorkspaceConfig } from './workspace/index.js';
 
 // ─── IPC Message Types ──────────────────────────────────────────────────────
 
@@ -45,6 +49,9 @@ export class AahiServer {
   private port: number;
   private clients = new Set<WebSocket>();
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
+  private ptyManager = new PTYManager();
+  private contextEngine = new ContextEngine(128_000);
+  private workspaceConfigManager = new WorkspaceConfigManager();
 
   constructor(config: AahiConfig, rootUri?: string) {
     this.port = parseInt(process.env.AAHI_IPC_PORT ?? '', 10) || DEFAULT_PORT;
@@ -144,6 +151,9 @@ export class AahiServer {
   }
 
   async stop(): Promise<void> {
+    // Kill all terminal sessions
+    this.ptyManager.killAll();
+
     // Shutdown LSP servers
     await this.lspManager.stopAll();
 
@@ -225,8 +235,14 @@ export class AahiServer {
         return this.handleKnowledgeGraph(action, request.params);
       case 'impact':
         return this.handleImpact(action, request.params);
+      case 'fim':
+        return this.handleFIM(action, request.params);
+      case 'terminal':
+        return this.handleTerminal(action, request.params, ws);
       case 'approval':
         return this.handleApproval(action, request.params);
+      case 'workspace':
+        return this.handleWorkspace(action, request.params);
       default:
         throw new Error(`Unknown domain: ${domain}`);
     }
@@ -410,10 +426,41 @@ export class AahiServer {
 
   private async handleContext(
     action: string,
-    _params: Record<string, unknown>,
+    params: Record<string, unknown>,
   ): Promise<unknown> {
     switch (action) {
-      // Placeholder — ContextEngine methods will be wired here
+      case 'stats': {
+        const usageStats = this.contextEngine.getUsageStats();
+        const budgetStats = this.contextEngine.getBudgetStats();
+        const usedTokens = usageStats.reduce((sum, s) => sum + s.tokenEstimate, 0);
+        const redactionStats = this.aahi.redaction.getStats();
+        return {
+          totalTokens: budgetStats.totalBudget,
+          usedTokens,
+          sources: usageStats,
+          redactionCount: redactionStats.totalRedactions,
+          redactionsByType: redactionStats.byType,
+        };
+      }
+      case 'assemble': {
+        const assembly = this.contextEngine.assemble();
+        return {
+          chunks: assembly.sources.flatMap((s) => s.chunks),
+          totalTokens: assembly.totalTokens,
+          budget: assembly.budget,
+          redactionMapId: assembly.redactionMapId,
+        };
+      }
+      case 'addSource': {
+        const source = params.source as ContextSource;
+        this.contextEngine.addSource(source);
+        return { added: true };
+      }
+      case 'removeSource': {
+        const sourceId = params.sourceId as string;
+        this.contextEngine.removeSource(sourceId);
+        return { removed: true };
+      }
       default:
         throw new Error(`Unknown context action: ${action}`);
     }
@@ -449,6 +496,26 @@ export class AahiServer {
         return this.aahi.knowledgeGraph.whoKnows(params.filePath as string);
       case 'getExpertise':
         return this.aahi.knowledgeGraph.getExpertise(params.person as string);
+      case 'listServices':
+        return this.aahi.knowledgeGraph.listServices();
+      case 'listADRs':
+        return this.aahi.knowledgeGraph.searchADRs((params.query as string) ?? '');
+      case 'searchIncidents':
+        return this.aahi.knowledgeGraph.searchIncidents((params.query as string) ?? '');
+      case 'getOnboardingContext':
+        return this.aahi.knowledgeGraph.getOnboardingContext(params.service as string);
+      case 'addServiceOwnership':
+        this.aahi.knowledgeGraph.addServiceOwnership(params.ownership as any);
+        return { added: true };
+      case 'addExpertise':
+        this.aahi.knowledgeGraph.addExpertise(params.entry as any);
+        return { added: true };
+      case 'addADR':
+        this.aahi.knowledgeGraph.addADR(params.decision as any);
+        return { added: true };
+      case 'addIncidentLearning':
+        this.aahi.knowledgeGraph.addIncidentLearning(params.learning as any);
+        return { added: true };
       default:
         throw new Error(`Unknown knowledgeGraph action: ${action}`);
     }
@@ -482,6 +549,108 @@ export class AahiServer {
         return { count: this.pendingApprovals.size };
       default:
         throw new Error(`Unknown approval action: ${action}`);
+    }
+  }
+
+  // ── FIM Handler ─────────────────────────────────────────────────────
+
+  private async handleFIM(
+    action: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    switch (action) {
+      case 'complete': {
+        const adapter = this.aahi.modelRouter.getAdapter(
+          'fim-autocomplete' as import('./ai/models/types.js').TaskType,
+        );
+        const prefix = params.prefix as string;
+        const suffix = params.suffix as string;
+
+        const prompt = `<|fim_prefix|>${prefix}<|fim_suffix|>${suffix}<|fim_middle|>`;
+        const response = await adapter.call({
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: (params.maxTokens as number) ?? 256,
+          temperature: 0.2,
+          stop: ['\n\n', '<|fim_pad|>', '<|endoftext|>'],
+        });
+
+        return { text: response.content, model: response.model };
+      }
+      default:
+        throw new Error(`Unknown fim action: ${action}`);
+    }
+  }
+
+  // ── Terminal Handler ───────────────────────────────────────────────────
+
+  private async handleTerminal(
+    action: string,
+    params: Record<string, unknown>,
+    ws: WebSocket,
+  ): Promise<unknown> {
+    switch (action) {
+      case 'create': {
+        const id = this.ptyManager.createSession(params.cwd as string);
+        this.ptyManager.onOutput(id, (data) => {
+          ws.send(
+            JSON.stringify({
+              event: 'terminal.output',
+              data: { sessionId: id, output: data },
+            } satisfies IPCEvent),
+          );
+        });
+        return { sessionId: id };
+      }
+      case 'write':
+        this.ptyManager.write(
+          params.sessionId as string,
+          params.data as string,
+        );
+        return { ok: true };
+      case 'kill':
+        this.ptyManager.killSession(params.sessionId as string);
+        return { ok: true };
+      case 'list':
+        return this.ptyManager.listSessions();
+      case 'resize':
+        this.ptyManager.resize(
+          params.sessionId as string,
+          params.cols as number,
+          params.rows as number,
+        );
+        return { ok: true };
+      default:
+        throw new Error(`Unknown terminal action: ${action}`);
+    }
+  }
+
+  // ── Workspace Handler ──────────────────────────────────────────────────
+
+  private async handleWorkspace(
+    action: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    switch (action) {
+      case 'load': {
+        const rootPath = params.rootPath as string;
+        return this.workspaceConfigManager.load(rootPath);
+      }
+      case 'save': {
+        const config = params.config as WorkspaceConfig;
+        await this.workspaceConfigManager.save(config);
+        return { saved: true };
+      }
+      case 'getDefault': {
+        const rootPath = (params.rootPath as string) ?? '.';
+        return this.workspaceConfigManager.getDefault(rootPath);
+      }
+      case 'apply': {
+        const config = params.config as WorkspaceConfig;
+        this.workspaceConfigManager.applyToRuntime(config, this.aahi);
+        return { applied: true };
+      }
+      default:
+        throw new Error(`Unknown workspace action: ${action}`);
     }
   }
 

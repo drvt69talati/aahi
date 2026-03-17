@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { runtime } from '../bridge/runtime-client';
 import { tauri, isTauri } from '../bridge/tauri-bridge';
 import type { IndexEntry } from '../bridge/tauri-bridge';
+import { useToastStore } from './toast-store';
 
 // ── Types matching runtime IPC protocol ──────────────────────────────────
 
@@ -100,6 +101,7 @@ interface RuntimeState {
 
   // Agents
   agentExecutions: AgentExecution[];
+  agentHistory: AgentExecution[]; // Completed executions (persisted)
 
   // Approvals
   pendingApprovals: ApprovalRequest[];
@@ -129,6 +131,9 @@ interface RuntimeState {
   // Agent actions
   runAgent: (agentId: string, intent: string) => Promise<void>;
   runPlan: (intent: string) => Promise<void>;
+  retryAgentStep: (planId: string, stepId: string) => Promise<void>;
+  cancelAgent: (planId: string) => Promise<void>;
+  clearAgentHistory: () => void;
 
   // Approval actions
   respondToApproval: (requestId: string, approved: boolean) => Promise<void>;
@@ -222,6 +227,16 @@ function buildFileTree(entries: IndexEntry[], root: string): FileEntry[] {
   return topLevel;
 }
 
+// ── Toast helper ─────────────────────────────────────────────────────────
+
+function toast(type: 'info' | 'success' | 'warning' | 'error', title: string, opts?: {
+  message?: string;
+  action?: { label: string; onClick: () => void };
+  duration?: number;
+}) {
+  useToastStore.getState().addToast({ type, title, ...opts });
+}
+
 // ── Event unsubscribe handles ────────────────────────────────────────────
 
 const unsubscribers: Array<() => void> = [];
@@ -235,6 +250,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   chatMessages: [],
   chatStreaming: false,
   agentExecutions: [],
+  agentHistory: [],
   pendingApprovals: [],
   timelineEvents: [],
   proactiveAlerts: [],
@@ -260,6 +276,25 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       // Connect WebSocket
       await runtime.connect();
       set({ connected: true, error: null });
+
+      // Listen for WebSocket disconnect
+      unsubscribers.push(
+        runtime.on('disconnect', () => {
+          set({ connected: false });
+          toast('error', 'Connection lost', {
+            message: 'Reconnecting...',
+            duration: 0, // persist until manually dismissed or reconnected
+          });
+        }),
+      );
+
+      // Listen for reconnect
+      unsubscribers.push(
+        runtime.on('reconnect', () => {
+          set({ connected: true });
+          toast('success', 'Connection restored');
+        }),
+      );
 
       // ── Subscribe to all server events ───────────────────────────────
 
@@ -449,6 +484,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   // ── Agents ─────────────────────────────────────────────────────────────
 
   runAgent: async (agentId: string, intent: string) => {
+    const startTime = Date.now();
     const execution: AgentExecution = {
       planId: `plan_${Date.now()}`,
       agentId,
@@ -463,6 +499,13 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
 
     try {
       const result = await runtime.request('agent.run', { agentId, intent });
+      const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      const completedExec: AgentExecution = {
+        ...execution,
+        status: 'completed' as const,
+        steps: get().agentExecutions.find((e) => e.planId === execution.planId)?.steps ?? execution.steps,
+      };
 
       set((s) => ({
         agentExecutions: s.agentExecutions.map((e) =>
@@ -470,17 +513,37 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
             ? { ...e, status: 'completed' as const, result }
             : e,
         ),
+        agentHistory: [...s.agentHistory, completedExec],
       }));
+
+      toast('success', `${agentId} agent completed (${durationSec}s)`);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Agent execution failed';
+      const planId = execution.planId;
+
+      const failedExec: AgentExecution = {
+        ...execution,
+        status: 'failed' as const,
+        steps: get().agentExecutions.find((e) => e.planId === execution.planId)?.steps ?? execution.steps,
+      };
+
       set((s) => ({
         agentExecutions: s.agentExecutions.map((e) =>
-          e.planId === execution.planId
+          e.planId === planId
             ? { ...e, status: 'failed' as const }
             : e,
         ),
+        agentHistory: [...s.agentHistory, failedExec],
         error: errorMsg,
       }));
+
+      toast('error', 'Agent execution failed', {
+        message: errorMsg,
+        action: {
+          label: 'Retry',
+          onClick: () => get().runAgent(agentId, intent),
+        },
+      });
     }
   },
 
@@ -495,6 +558,36 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     }
   },
 
+  retryAgentStep: async (planId: string, stepId: string) => {
+    try {
+      await runtime.request('agent.retryStep', { planId, stepId });
+      toast('info', 'Retrying step...', { message: `Step ${stepId} resubmitted` });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Retry failed';
+      toast('error', 'Step retry failed', { message: errorMsg });
+    }
+  },
+
+  cancelAgent: async (planId: string) => {
+    try {
+      await runtime.request('agent.cancel', { planId });
+      set((s) => ({
+        agentExecutions: s.agentExecutions.map((e) =>
+          e.planId === planId ? { ...e, status: 'failed' as const } : e,
+        ),
+      }));
+      toast('warning', 'Agent execution cancelled');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Cancel failed';
+      toast('error', 'Failed to cancel agent', { message: errorMsg });
+    }
+  },
+
+  clearAgentHistory: () => {
+    set({ agentHistory: [] });
+    toast('info', 'Agent history cleared');
+  },
+
   // ── Approvals ──────────────────────────────────────────────────────────
 
   respondToApproval: async (requestId: string, approved: boolean) => {
@@ -503,9 +596,14 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       set((s) => ({
         pendingApprovals: s.pendingApprovals.filter((a) => a.actionId !== requestId),
       }));
+      toast(
+        approved ? 'success' : 'warning',
+        approved ? 'Action approved' : 'Action declined',
+      );
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Approval response failed';
       set({ error: errorMsg });
+      toast('error', 'Approval response failed', { message: errorMsg });
     }
   },
 
@@ -543,9 +641,12 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         }
         return { openFiles: files };
       });
+      const fileName = path.split('/').pop() || path;
+      toast('success', 'File saved', { message: fileName, duration: 3000 });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : `Failed to save ${path}`;
       set({ error: errorMsg });
+      toast('error', 'Failed to save file', { message: errorMsg });
     }
   },
 
@@ -576,9 +677,17 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       await runtime.request('integration.connect', { integrationId: id, credentials });
       // Reload integration list to reflect new status
       await get().loadIntegrations();
+      toast('success', `Integration connected`, { message: id });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : `Failed to connect integration ${id}`;
       set({ error: errorMsg });
+      toast('error', 'Integration connection failed', {
+        message: errorMsg,
+        action: {
+          label: 'Retry',
+          onClick: () => get().connectIntegration(id, credentials),
+        },
+      });
     }
   },
 

@@ -11,6 +11,10 @@ import { InlinePromptBar, useInlinePrompt } from './editor/InlinePromptBar';
 import { ChatPanel } from './panels/ChatPanel/ChatPanel';
 import { StatusBar } from './components/StatusBar';
 import { getSessionManager } from './store/session-manager';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastNotification } from './components/ToastNotification';
+import { ProgressBar } from './components/ProgressBar';
+import { Breadcrumbs } from './components/Breadcrumbs';
 
 const styles = {
   root: {
@@ -61,6 +65,10 @@ export const App: React.FC = () => {
   } = useAppStore();
 
   const initialize = useRuntimeStore((s) => s.initialize);
+  const agentExecutions = useRuntimeStore((s) => s.agentExecutions);
+
+  // Show progress bar when any agent is running
+  const isAgentRunning = agentExecutions.some((e) => e.status === 'running');
 
   const inlinePrompt = useInlinePrompt();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -132,20 +140,30 @@ export const App: React.FC = () => {
 
   return (
     <div style={styles.root}>
+      {/* Global Progress Bar — very top of the app */}
+      <ProgressBar active={isAgentRunning} />
+
       <TopBar />
 
       <div style={styles.body}>
         {/* Left Sidebar */}
-        <Sidebar />
+        <ErrorBoundary name="Sidebar">
+          <Sidebar />
+        </ErrorBoundary>
 
         {/* Center: TabBar + Editor + Bottom Panel */}
         <div style={styles.center}>
           {/* Tab Bar */}
           <TabBar />
 
+          {/* Breadcrumbs — below tab bar, above editor */}
+          <Breadcrumbs />
+
           {/* Monaco Editor */}
           <div style={styles.editorArea}>
-            <MonacoCore />
+            <ErrorBoundary name="Editor">
+              <MonacoCore />
+            </ErrorBoundary>
 
             {/* Inline Prompt Bar (Cmd+K) */}
             {inlinePrompt.isOpen && (
@@ -162,7 +180,9 @@ export const App: React.FC = () => {
           {/* Bottom Panel */}
           {bottomPanelOpen && (
             <div style={styles.bottomPanel}>
-              <BottomPanel />
+              <ErrorBoundary name="Bottom Panel">
+                <BottomPanel />
+              </ErrorBoundary>
             </div>
           )}
         </div>
@@ -170,7 +190,9 @@ export const App: React.FC = () => {
         {/* Right Panel: AI Chat */}
         {rightPanelOpen && (
           <div style={styles.rightPanel}>
-            <ChatPanel />
+            <ErrorBoundary name="Chat Panel">
+              <ChatPanel />
+            </ErrorBoundary>
           </div>
         )}
       </div>
@@ -183,6 +205,9 @@ export const App: React.FC = () => {
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
       />
+
+      {/* Global Toast Notifications */}
+      <ToastNotification />
     </div>
   );
 };
