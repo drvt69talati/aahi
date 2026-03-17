@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAppStore } from '../store/app-store';
 import { ModelPicker } from './ModelPicker';
 
-const styles = {
+const styles: Record<string, React.CSSProperties> = {
   topBar: {
     display: 'flex',
     alignItems: 'center',
@@ -11,8 +11,7 @@ const styles = {
     borderBottom: '1px solid #3e3e42',
     padding: '0 12px',
     gap: 12,
-    userSelect: 'none' as const,
-    WebkitAppRegion: 'drag' as const,
+    userSelect: 'none',
   },
   logo: {
     display: 'flex',
@@ -22,7 +21,6 @@ const styles = {
     fontWeight: 700,
     color: '#4ec9b0',
     letterSpacing: 1.5,
-    WebkitAppRegion: 'no-drag' as const,
   },
   hexIcon: {
     fontSize: 16,
@@ -41,7 +39,6 @@ const styles = {
     color: '#cccccc',
     fontSize: 12,
     cursor: 'pointer',
-    WebkitAppRegion: 'no-drag' as const,
   },
   incidentBadge: {
     display: 'flex',
@@ -54,7 +51,6 @@ const styles = {
     fontSize: 11,
     fontWeight: 600,
     cursor: 'pointer',
-    WebkitAppRegion: 'no-drag' as const,
   },
   iconBtn: {
     display: 'flex',
@@ -68,7 +64,6 @@ const styles = {
     color: '#858585',
     fontSize: 14,
     cursor: 'pointer',
-    WebkitAppRegion: 'no-drag' as const,
   },
   focusToggle: {
     display: 'flex',
@@ -79,7 +74,6 @@ const styles = {
     borderRadius: 3,
     fontSize: 11,
     cursor: 'pointer',
-    WebkitAppRegion: 'no-drag' as const,
   },
 };
 
@@ -99,7 +93,7 @@ export const TopBar: React.FC = () => {
         <span>AAHI</span>
       </div>
 
-      <div style={{ position: 'relative', WebkitAppRegion: 'no-drag' as const }}>
+      <div style={{ position: 'relative' as const }}>
         <button
           style={styles.workspaceBtn}
           onClick={() => setShowModelPicker(!showModelPicker)}

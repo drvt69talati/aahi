@@ -307,11 +307,10 @@ jobs:
           ls -lh release-files/
 
       - name: Generate release notes
-        id: notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          cat > release-notes.md << 'NOTES'
-          ## Aahi ${{ github.ref_name }} — AI-native Software Operations Platform
+          cat > release-notes.md << NOTES
+          ## Aahi v${VERSION} — AI-native Software Operations Platform
 
           **Not a VSCode fork.** Monaco + Tauri + LSP + Node.js Runtime + MCP.
 
@@ -319,35 +318,31 @@ jobs:
 
           | Platform | File | Type |
           |----------|------|------|
-          | **macOS (Apple Silicon)** | `Aahi_VERSION_aarch64.dmg` | DMG installer |
-          | **macOS (Intel)** | `Aahi_VERSION_x64.dmg` | DMG installer |
-          | **Windows** | `Aahi_VERSION_x64-setup.exe` | NSIS installer |
-          | **Windows** | `Aahi_VERSION_x64_en-US.msi` | MSI installer |
-          | **Linux** | `aahi_VERSION_amd64.deb` | Debian/Ubuntu |
-          | **Linux** | `aahi-VERSION-1.x86_64.rpm` | Fedora/RHEL |
-          | **Linux** | `aahi_VERSION_amd64.AppImage` | Universal AppImage |
-          | **npm** | `aahi-VERSION.tgz` | npm package |
-          | **Source** | `aahi-VERSION-source.tar.gz` | Source tarball |
-          | **Source** | `aahi-VERSION-source.zip` | Source zip |
-
-          ### What's New
-
-          See [CHANGELOG](https://github.com/drvt69talati/aahi/blob/main/CHANGELOG.md) for details.
+          | **macOS (Apple Silicon)** | \`Aahi_${VERSION}_aarch64.dmg\` | DMG installer |
+          | **macOS (Intel)** | \`Aahi_${VERSION}_x64.dmg\` | DMG installer |
+          | **Windows** | \`Aahi_${VERSION}_x64-setup.exe\` | NSIS installer |
+          | **Windows** | \`Aahi_${VERSION}_x64_en-US.msi\` | MSI installer |
+          | **Linux** | \`aahi_${VERSION}_amd64.deb\` | Debian/Ubuntu |
+          | **Linux** | \`aahi-${VERSION}-1.x86_64.rpm\` | Fedora/RHEL |
+          | **Linux** | \`aahi_${VERSION}_amd64.AppImage\` | Universal AppImage |
+          | **npm** | \`aahi-${VERSION}.tgz\` | npm package |
+          | **Source** | \`aahi-${VERSION}-source.tar.gz\` | Source tarball |
+          | **Source** | \`aahi-${VERSION}-source.zip\` | Source zip |
 
           ### Verify
 
-          ```bash
-          # npm
-          npm install aahi-VERSION.tgz
+          \`\`\`bash
+          # macOS — bypass Gatekeeper for unsigned builds
+          sudo xattr -rd com.apple.quarantine /Applications/Aahi.app
 
-          # macOS
-          # Open DMG, drag Aahi to Applications
+          # npm
+          npm install aahi-${VERSION}.tgz
 
           # Linux
-          sudo dpkg -i aahi_VERSION_amd64.deb     # Debian/Ubuntu
-          sudo rpm -i aahi-VERSION-1.x86_64.rpm    # Fedora/RHEL
-          chmod +x aahi_VERSION_amd64.AppImage      # AppImage
-          ```
+          sudo dpkg -i aahi_${VERSION}_amd64.deb     # Debian/Ubuntu
+          sudo rpm -i aahi-${VERSION}-1.x86_64.rpm    # Fedora/RHEL
+          chmod +x aahi_${VERSION}_amd64.AppImage      # AppImage
+          \`\`\`
           NOTES
 
       - name: Update GitHub Release
